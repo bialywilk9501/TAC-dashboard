@@ -123,14 +123,13 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-  // Inicjalizacja Mapy
+// Inicjalizacja Mapy
     const map = L.map('map', { zoomControl: false }).setView([50.2599, 19.0216], 13);
 
-    // DARMOWA TAKTYCZNA CZARNA MAPA (CartoDB bez wymogu klucza)
-    L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', {
+    // Zdjęcia satelitarne Esri (darmowe, bez klucza API)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
-      subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap &copy; CARTO'
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
     }).addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
