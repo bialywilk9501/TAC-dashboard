@@ -123,9 +123,16 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // Inicjalizacja Mapy
+  // Inicjalizacja Mapy
     const map = L.map('map', { zoomControl: false }).setView([50.2599, 19.0216], 13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+    // DARMOWA TAKTYCZNA CZARNA MAPA (CartoDB bez wymogu klucza)
+    L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', {
+      maxZoom: 19,
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }).addTo(map);
+
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     // Zmienne stanowe
