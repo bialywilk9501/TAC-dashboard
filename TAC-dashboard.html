@@ -8,13 +8,34 @@
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
- /* Resetujemy domyślny domyślny styl ikony Leaflet */
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #00ff66; }
+    #map { width: 100vw; height: 100vh; z-index: 1; }
+
+    .control-panel {
+      position: absolute; top: 10px; left: 10px; z-index: 1000;
+      background: rgba(18, 18, 18, 0.85); border: 1px solid #00ff66;
+      padding: 12px; border-radius: 6px; box-shadow: 0 0 10px rgba(0, 255, 102, 0.2);
+      backdrop-filter: blur(5px); max-width: 300px; width: calc(100% - 20px);
+    }
+    .control-panel h3 { font-size: 14px; letter-spacing: 1px; margin-bottom: 10px; text-transform: uppercase; border-bottom: 1px solid #00ff66; padding-bottom: 4px; }
+    .field-group { margin-bottom: 8px; }
+    label { display: block; font-size: 10px; color: #aaa; margin-bottom: 2px; text-transform: uppercase; }
+    input[type="text"] { width: 100%; background: #000; border: 1px solid #00ff66; color: #00ff66; padding: 6px; border-radius: 4px; font-family: monospace; font-size: 13px; }
+    
+    button { width: 100%; background: #00ff66; color: #000; border: none; padding: 8px; font-weight: bold; border-radius: 4px; cursor: pointer; text-transform: uppercase; font-size: 11px; margin-top: 4px; }
+    button.active { background: #ff3333; color: white; }
+
+    .status-box { font-size: 11px; margin-top: 8px; padding: 4px; background: rgba(0, 0, 0, 0.5); border-left: 3px solid #ffcc00; word-break: break-all; }
+
+    /* RESET STYLE LEAFLETA */
     .leaflet-div-icon {
       background: transparent !important;
       border: none !important;
     }
 
-    /* Kontener ikony operatora */
+    /* KONTENER IKONY OPERATORA */
     .operator-marker-container {
       width: 30px;
       height: 30px;
@@ -24,7 +45,7 @@
       justify-content: center;
     }
 
-    /* Strzałka kierunkowa */
+    /* STRZAŁKA TAKTYCZNA */
     .compass-arrow {
       width: 0;
       height: 0;
@@ -36,7 +57,7 @@
       transition: transform 0.15s ease-out;
     }
 
-    /* Kropka pozycji centralnej GPS */
+    /* PUNKT GPS */
     .position-dot {
       position: absolute;
       width: 6px;
@@ -50,57 +71,11 @@
       z-index: 2;
     }
 
-    /* Etykieta z kryptonimem */
+    /* ETYKIETA CALLSIGN */
     .operator-label {
       position: absolute;
       top: 32px;
       background: rgba(0, 0, 0, 0.9);
-      color: #00ff66;
-      border: 1px solid #00ff66;
-      font-family: monospace;
-      font-size: 10px;
-      padding: 1px 4px;
-      white-space: nowrap;
-      border-radius: 2px;
-    }
-    /* STYLIZACJA STRZAŁKI TAKTYCZNEJ */
-    .operator-marker-container {
-      width: 30px;
-      height: 30px;
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .compass-arrow {
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-bottom: 20px solid #00ff66;
-      filter: drop-shadow(0 0 6px #00ff66);
-      transform-origin: 50% 50%;
-      transition: transform 0.15s ease-out;
-    }
-
-    .position-dot {
-      position: absolute;
-      width: 6px;
-      height: 6px;
-      background: #ffffff;
-      border: 1px solid #000000;
-      border-radius: 50%;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 2;
-    }
-
-    .operator-label {
-      position: absolute;
-      top: 32px;
-      background: rgba(0, 0, 0, 0.85);
       color: #00ff66;
       border: 1px solid #00ff66;
       font-family: monospace;
@@ -148,7 +123,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // Inicjalizacja Mapy - ciemne kafelki bez wymagania klucza API
+    // Inicjalizacja Mapy
     const map = L.map('map', { zoomControl: false }).setView([50.2599, 19.0216], 13);
     L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -166,10 +141,8 @@
     const callsignInput = document.getElementById('callsign');
     const statusDiv = document.getElementById('status');
 
-    // Generowanie ikony ze strzałką
-   function createOperatorIcon(callsign, heading) {
+    function createOperatorIcon(callsign, heading) {
       const angle = (typeof heading === 'number' && !isNaN(heading)) ? heading : 0;
-      
       return L.divIcon({
         className: 'leaflet-div-icon',
         html: `
@@ -184,23 +157,19 @@
       });
     }
 
-    // Start systemu
     window.requestPermissionsAndStart = async function() {
       myCallsign = callsignInput.value.trim().toUpperCase();
       if (!myCallsign) { alert("Wprowadź kryptonim!"); return; }
 
-      statusDiv.textContent = "Status: Uruchamianie czujników...";
+      statusDiv.textContent = "Status: Uruchamianie...";
 
-      // Rejestracja zdarzeń kompasu
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
           const permission = await DeviceOrientationEvent.requestPermission();
           if (permission === 'granted') {
             window.addEventListener('deviceorientation', handleOrientation, true);
           }
-        } catch (e) {
-          console.error(e);
-        }
+        } catch (e) { console.error(e); }
       } else {
         window.addEventListener('deviceorientationabsolute', handleOrientation, true);
         window.addEventListener('deviceorientation', handleOrientation, true);
@@ -216,9 +185,9 @@
     function handleOrientation(event) {
       let heading = null;
       if (event.webkitCompassHeading) {
-        heading = event.webkitCompassHeading; // iOS
+        heading = event.webkitCompassHeading;
       } else if (event.alpha !== null) {
-        heading = 360 - event.alpha; // Android
+        heading = 360 - event.alpha;
       }
 
       if (heading !== null && !isNaN(heading)) {
@@ -227,7 +196,7 @@
     }
 
     function startGps() {
-      if (!("geolocation" in navigator)) { alert("Brak wsparcia GPS"); return; }
+      if (!("geolocation" in navigator)) { alert("Brak GPS"); return; }
 
       const myRef = ref(db, `operators/${myCallsign}`);
       onDisconnect(myRef).remove();
@@ -270,7 +239,6 @@
       statusDiv.textContent = "Status: Zatrzymany";
     }
 
-    // Realtime Database listener
     const operatorsRef = ref(db, 'operators');
     onValue(operatorsRef, (snapshot) => {
       const activeOperators = snapshot.val() || {};
