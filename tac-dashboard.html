@@ -338,7 +338,6 @@
 // KONFIGURACJA FIREBASE — wklej tu dane swojego projektu.
 // Firebase Console -> Ustawienia projektu -> Twoje aplikacje -> SDK config
 // =====================================================================
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCW3iyh5jjYVif00FPqztEFCKqJTg1LD4Q",
   authDomain: "tac-dashboard-3f4e5.firebaseapp.com",
@@ -418,7 +417,8 @@ document.getElementById("login-submit").addEventListener("click", async () => {
       await signInWithEmailAndPassword(auth, email, password);
     }
   } catch (err) {
-    loginError.textContent = translateAuthError(err.code);
+    console.error("Firebase auth error:", err);
+    loginError.textContent = translateAuthError(err.code) + `  [${err.code || err.message}]`;
   }
 });
 
@@ -429,7 +429,11 @@ function translateAuthError(code) {
     "auth/wrong-password": "Błędne hasło.",
     "auth/invalid-credential": "Błędny e-mail lub hasło.",
     "auth/email-already-in-use": "Ten e-mail jest już zarejestrowany.",
-    "auth/weak-password": "Hasło musi mieć min. 6 znaków."
+    "auth/weak-password": "Hasło musi mieć min. 6 znaków.",
+    "auth/configuration-not-found": "Email/Password nie jest włączone w Firebase Auth.",
+    "auth/api-key-not-valid.-please-pass-a-valid-api-key.": "Błędny apiKey w konfiguracji Firebase.",
+    "auth/invalid-api-key": "Błędny apiKey w konfiguracji Firebase.",
+    "auth/unauthorized-domain": "Ta domena nie jest autoryzowana w Firebase Auth."
   };
   return map[code] || "Wystąpił błąd. Spróbuj ponownie.";
 }
