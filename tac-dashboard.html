@@ -97,7 +97,7 @@
   }
   .btn-logout:hover{ color:var(--red); border-color:var(--red); }
 
-  .layout{ flex:1; display:flex; min-height:0; }
+  .layout{ flex:1; display:flex; min-height:0; position:relative; }
 
   /* ---------- LEFT SIDEBAR ---------- */
   .sidebar-left{
@@ -157,9 +157,12 @@
   /* ---------- RIGHT SIDEBAR (CHAT) ---------- */
   .sidebar-right{
     width:280px; flex:none; background:var(--bg-1); border-left:1px solid var(--line);
-    display:flex; flex-direction:column; transition:margin-right 0.15s ease;
+    display:flex; flex-direction:column;
+    position:absolute; top:0; right:0; bottom:0; z-index:900;
+    transform:translateX(0); transition:transform 0.28s ease;
+    box-shadow:-8px 0 24px rgba(0,0,0,0.35);
   }
-  .sidebar-right.collapsed{ margin-right:-280px; }
+  .sidebar-right.collapsed{ transform:translateX(100%); box-shadow:none; }
   .chat-header{
     height:40px; flex:none; display:flex; align-items:center; justify-content:space-between;
     padding:0 12px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:11.5px; color:var(--text-mid);
@@ -179,7 +182,7 @@
   }
   .chat-toggle-collapsed{
     position:absolute; top:12px; right:12px; z-index:500; width:36px; height:36px; background:var(--bg-1);
-    border:1px solid var(--line); color:var(--text-mid); display:none; align-items:center; justify-content:center; cursor:pointer;
+    border:1px solid var(--line); color:var(--text-mid); display:flex; align-items:center; justify-content:center; cursor:pointer;
   }
 
   /* ---------- MODAL ---------- */
@@ -266,6 +269,7 @@
       <div class="panel-title">WARSTWY</div>
       <label class="layer-row"><input type="checkbox" id="layer-units" checked> Jednostki</label>
       <label class="layer-row"><input type="checkbox" id="layer-markers" checked> Znaczniki</label>
+      <label class="layer-row"><input type="checkbox" id="layer-zones" checked> Strefy</label>
       <label class="layer-row"><input type="checkbox" id="layer-tracks" checked> Trasy (sesja)</label>
 
       <div class="panel-title">MAPA BAZOWA</div>
@@ -281,6 +285,8 @@
       <div class="map-toolbar">
         <button class="tool-btn" id="tool-locate" title="Wyśrodkuj na mnie">◎</button>
         <button class="tool-btn" id="tool-marker" title="Dodaj znacznik">✛</button>
+        <button class="tool-btn" id="tool-zone-circle" title="Dodaj strefę okrągłą">◯</button>
+        <button class="tool-btn" id="tool-zone-polygon" title="Dodaj strefę obszarową">▱</button>
       </div>
 
       <div class="placing-banner" id="placing-banner">
@@ -288,12 +294,23 @@
         <button id="placing-cancel">Anuluj</button>
       </div>
 
+      <div class="placing-banner" id="zone-circle-banner">
+        <span id="zone-circle-hint">Kliknij, aby ustawić środek strefy</span>
+        <button id="zone-circle-cancel">Anuluj</button>
+      </div>
+
+      <div class="placing-banner" id="zone-polygon-banner">
+        Klikaj wierzchołki strefy (min. 3)
+        <button id="zone-polygon-finish">Zakończ</button>
+        <button id="zone-polygon-cancel">Anuluj</button>
+      </div>
+
       <div class="coord-readout" id="coord-readout">LAT — · LON —</div>
 
       <button class="chat-toggle-collapsed" id="chat-show">💬</button>
     </main>
 
-    <aside class="sidebar-right" id="chat-panel">
+    <aside class="sidebar-right collapsed" id="chat-panel">
       <div class="chat-header">
         <span>ŁĄCZNOŚĆ ZESPOŁU</span>
         <button id="chat-hide">✕</button>
@@ -327,6 +344,30 @@
     <div class="modal-actions">
       <button id="marker-cancel">Anuluj</button>
       <button class="confirm" id="marker-confirm">Postaw znacznik</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= ZONE MODAL ======================= -->
+<div class="modal-overlay" id="zone-modal">
+  <div class="modal">
+    <h3>Nowa strefa</h3>
+    <div class="field">
+      <label>NAZWA STREFY</label>
+      <input type="text" id="zone-label" placeholder="np. Strefa operacyjna Północ" maxlength="60">
+    </div>
+    <div class="field">
+      <label>TYP</label>
+      <select id="zone-type">
+        <option value="operation">Strefa działań</option>
+        <option value="safe">Strefa bezpieczna</option>
+        <option value="danger">Strefa zagrożenia</option>
+        <option value="restricted">Strefa zamknięta</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button id="zone-cancel">Anuluj</button>
+      <button class="confirm" id="zone-confirm">Zapisz strefę</button>
     </div>
   </div>
 </div>
@@ -370,15 +411,22 @@ const MARKER_TYPES = {
   support:{ letter:"W", color:"#4FB6A8", label:"Wsparcie" },
   recon:{ letter:"R", color:"#8B96A3", label:"Rozpoznanie" }
 };
+const ZONE_TYPES = {
+  operation:{ color:"#5B8DEF", label:"Strefa działań" },
+  safe:{ color:"#4FB6A8", label:"Strefa bezpieczna" },
+  danger:{ color:"#D9604A", label:"Strefa zagrożenia" },
+  restricted:{ color:"#B18CD9", label:"Strefa zamknięta" }
+};
 
 let currentUser = null;
 let currentProfile = null;
 let watchId = null;
-let unsubLocations = null, unsubMarkers = null, unsubMessages = null;
+let unsubLocations = null, unsubMarkers = null, unsubMessages = null, unsubZones = null;
 const trails = {};      // uid -> [ [lat,lng], ... ] (sesja bieżąca)
 const trailLines = {};  // uid -> L.Polyline
 const unitMarkers = {}; // uid -> { dot: L.Marker, label: L.Marker }
-const pinMarkers = {};  // markerId -> L.Marker
+const pinMarkers = {};  // markerId -> { pin: L.Marker, label: L.Marker }
+const zoneShapes = {};  // zoneId -> L.Circle | L.Polygon
 
 // ---------------------------------------------------------------
 // LOGIN / REJESTRACJA
@@ -474,6 +522,7 @@ function cleanup() {
   if (unsubLocations) unsubLocations();
   if (unsubMarkers) unsubMarkers();
   if (unsubMessages) unsubMessages();
+  if (unsubZones) unsubZones();
   Object.keys(trails).forEach(k => delete trails[k]);
 }
 
@@ -510,7 +559,20 @@ function initMap() {
   });
 
   map.on("click", (e) => {
-    if (placingMarker) openMarkerModal(e.latlng);
+    if (placingMarker) { openMarkerModal(e.latlng); return; }
+    if (zoneMode === "circle-center") { handleCircleCenterClick(e.latlng); return; }
+    if (zoneMode === "circle-radius") { handleCircleRadiusClick(e.latlng); return; }
+    if (zoneMode === "polygon") { handlePolygonClick(e.latlng); return; }
+  });
+
+  map.on("mousemove", (e) => {
+    if (zoneMode === "circle-radius" && circleDraft) {
+      circleDraft.shape.setRadius(map.distance(circleDraft.center, e.latlng));
+    }
+    if (zoneMode === "polygon" && polygonPoints.length > 0) {
+      const preview = polygonPoints.concat([[e.latlng.lat, e.latlng.lng]]);
+      polygonPreviewLine.setLatLngs(preview);
+    }
   });
 }
 
@@ -532,6 +594,7 @@ document.querySelectorAll(".basemap-btn").forEach(btn => {
 const layerToggles = {
   units: document.getElementById("layer-units"),
   markers: document.getElementById("layer-markers"),
+  zones: document.getElementById("layer-zones"),
   tracks: document.getElementById("layer-tracks")
 };
 Object.entries(layerToggles).forEach(([key, el]) => {
@@ -545,7 +608,12 @@ function applyLayerVisibility(key) {
     });
   }
   if (key === "markers") {
-    Object.values(pinMarkers).forEach(m => visible ? m.addTo(map) : map.removeLayer(m));
+    Object.values(pinMarkers).forEach(m => {
+      visible ? (m.pin.addTo(map), m.label.addTo(map)) : (map.removeLayer(m.pin), map.removeLayer(m.label));
+    });
+  }
+  if (key === "zones") {
+    Object.values(zoneShapes).forEach(z => visible ? z.addTo(map) : map.removeLayer(z));
   }
   if (key === "tracks") {
     Object.values(trailLines).forEach(l => visible ? l.addTo(map) : map.removeLayer(l));
@@ -695,6 +763,7 @@ let placingMarker = false;
 let pendingLatLng = null;
 
 document.getElementById("tool-marker").addEventListener("click", () => {
+  if (zoneMode) cancelZoneDrawing();
   placingMarker = !placingMarker;
   document.getElementById("tool-marker").classList.toggle("active", placingMarker);
   document.getElementById("placing-banner").style.display = placingMarker ? "flex" : "none";
@@ -732,7 +801,11 @@ function listenMarkers() {
       const id = change.doc.id;
       const d = change.doc.data();
       if (change.type === "removed") {
-        if (pinMarkers[id]) { map.removeLayer(pinMarkers[id]); delete pinMarkers[id]; }
+        if (pinMarkers[id]) {
+          map.removeLayer(pinMarkers[id].pin);
+          map.removeLayer(pinMarkers[id].label);
+          delete pinMarkers[id];
+        }
         return;
       }
       const meta = MARKER_TYPES[d.type] || MARKER_TYPES.objective;
@@ -740,14 +813,153 @@ function listenMarkers() {
         className: "", html: `<div class="divicon-marker" style="width:22px;height:22px;background:${meta.color};border-radius:3px;">${meta.letter}</div>`,
         iconSize: [22, 22], iconAnchor: [11, 11]
       });
+      const labelIcon = L.divIcon({
+        className: "", html: `<div class="unit-label">${escapeHtml(d.label || "")}</div>`,
+        iconSize: [0, 0], iconAnchor: [-16, -4]
+      });
       if (pinMarkers[id]) {
-        pinMarkers[id].setLatLng([d.lat, d.lng]);
+        pinMarkers[id].pin.setLatLng([d.lat, d.lng]);
+        pinMarkers[id].label.setLatLng([d.lat, d.lng]);
       } else {
-        pinMarkers[id] = L.marker([d.lat, d.lng], { icon })
+        const pin = L.marker([d.lat, d.lng], { icon })
           .bindPopup(`<b>${escapeHtml(d.label)}</b><br>${meta.label}<br><small>${escapeHtml(d.createdBy || "")}</small>`)
           .addTo(map);
-        if (!layerToggles.markers.checked) map.removeLayer(pinMarkers[id]);
+        const label = L.marker([d.lat, d.lng], { icon: labelIcon, interactive: false }).addTo(map);
+        pinMarkers[id] = { pin, label };
+        if (!layerToggles.markers.checked) { map.removeLayer(pin); map.removeLayer(label); }
       }
+    });
+  });
+}
+
+// ---------------------------------------------------------------
+// STREFY (okrągłe i obszarowe)
+// ---------------------------------------------------------------
+let zoneMode = null;        // null | "circle-center" | "circle-radius" | "polygon"
+let circleDraft = null;     // { center: LatLng, shape: L.Circle }
+let polygonPoints = [];     // [[lat,lng], ...]
+let polygonPreviewLine = null;
+let polygonVertexMarkers = [];
+let pendingZoneGeometry = null;
+
+function resetZoneUI() {
+  document.getElementById("tool-zone-circle").classList.remove("active");
+  document.getElementById("tool-zone-polygon").classList.remove("active");
+  document.getElementById("zone-circle-banner").style.display = "none";
+  document.getElementById("zone-polygon-banner").style.display = "none";
+}
+
+function cancelZoneDrawing() {
+  if (circleDraft) { map.removeLayer(circleDraft.shape); circleDraft = null; }
+  if (polygonPreviewLine) { map.removeLayer(polygonPreviewLine); polygonPreviewLine = null; }
+  polygonVertexMarkers.forEach(m => map.removeLayer(m));
+  polygonVertexMarkers = [];
+  polygonPoints = [];
+  zoneMode = null;
+  resetZoneUI();
+}
+
+document.getElementById("tool-zone-circle").addEventListener("click", () => {
+  if (zoneMode) { cancelZoneDrawing(); return; }
+  if (placingMarker) { placingMarker = false; document.getElementById("tool-marker").classList.remove("active"); document.getElementById("placing-banner").style.display = "none"; }
+  zoneMode = "circle-center";
+  document.getElementById("tool-zone-circle").classList.add("active");
+  document.getElementById("zone-circle-hint").textContent = "Kliknij, aby ustawić środek strefy";
+  document.getElementById("zone-circle-banner").style.display = "flex";
+});
+document.getElementById("zone-circle-cancel").addEventListener("click", cancelZoneDrawing);
+
+function handleCircleCenterClick(latlng) {
+  circleDraft = {
+    center: latlng,
+    shape: L.circle(latlng, { radius: 50, color: "#5B8DEF", weight: 2, fillOpacity: 0.12 }).addTo(map)
+  };
+  zoneMode = "circle-radius";
+  document.getElementById("zone-circle-hint").textContent = "Poruszaj myszą i kliknij, aby ustawić promień";
+}
+function handleCircleRadiusClick(latlng) {
+  const radius = map.distance(circleDraft.center, latlng);
+  pendingZoneGeometry = { kind: "circle", lat: circleDraft.center.lat, lng: circleDraft.center.lng, radius };
+  map.removeLayer(circleDraft.shape);
+  circleDraft = null;
+  zoneMode = null;
+  resetZoneUI();
+  openZoneModal();
+}
+
+document.getElementById("tool-zone-polygon").addEventListener("click", () => {
+  if (zoneMode) { cancelZoneDrawing(); return; }
+  if (placingMarker) { placingMarker = false; document.getElementById("tool-marker").classList.remove("active"); document.getElementById("placing-banner").style.display = "none"; }
+  zoneMode = "polygon";
+  polygonPoints = [];
+  polygonPreviewLine = L.polyline([], { color: "#5B8DEF", weight: 2, dashArray: "4,4" }).addTo(map);
+  document.getElementById("tool-zone-polygon").classList.add("active");
+  document.getElementById("zone-polygon-banner").style.display = "flex";
+});
+document.getElementById("zone-polygon-cancel").addEventListener("click", cancelZoneDrawing);
+document.getElementById("zone-polygon-finish").addEventListener("click", () => {
+  if (polygonPoints.length < 3) return;
+  pendingZoneGeometry = { kind: "polygon", points: polygonPoints.slice() };
+  if (polygonPreviewLine) { map.removeLayer(polygonPreviewLine); polygonPreviewLine = null; }
+  polygonVertexMarkers.forEach(m => map.removeLayer(m));
+  polygonVertexMarkers = [];
+  polygonPoints = [];
+  zoneMode = null;
+  resetZoneUI();
+  openZoneModal();
+});
+
+function handlePolygonClick(latlng) {
+  polygonPoints.push([latlng.lat, latlng.lng]);
+  const vm = L.circleMarker(latlng, { radius: 4, color: "#5B8DEF", fillColor: "#5B8DEF", fillOpacity: 1 }).addTo(map);
+  polygonVertexMarkers.push(vm);
+}
+
+function openZoneModal() {
+  document.getElementById("zone-modal").classList.add("open");
+}
+document.getElementById("zone-cancel").addEventListener("click", () => {
+  document.getElementById("zone-modal").classList.remove("open");
+  pendingZoneGeometry = null;
+});
+document.getElementById("zone-confirm").addEventListener("click", async () => {
+  if (!pendingZoneGeometry) return;
+  const label = document.getElementById("zone-label").value.trim() || "Bez nazwy";
+  const type = document.getElementById("zone-type").value;
+  await addDoc(collection(db, "zones"), {
+    label, type, geometry: pendingZoneGeometry,
+    createdBy: currentProfile.callsign, createdAt: serverTimestamp()
+  });
+  pendingZoneGeometry = null;
+  document.getElementById("zone-label").value = "";
+  document.getElementById("zone-modal").classList.remove("open");
+});
+
+function listenZones() {
+  unsubZones = onSnapshot(collection(db, "zones"), (snap) => {
+    snap.docChanges().forEach((change) => {
+      const id = change.doc.id;
+      if (change.type === "removed") {
+        if (zoneShapes[id]) { map.removeLayer(zoneShapes[id]); delete zoneShapes[id]; }
+        return;
+      }
+      const d = change.doc.data();
+      const meta = ZONE_TYPES[d.type] || ZONE_TYPES.operation;
+      const g = d.geometry;
+      if (zoneShapes[id]) { map.removeLayer(zoneShapes[id]); delete zoneShapes[id]; }
+
+      let shape;
+      if (g.kind === "circle") {
+        shape = L.circle([g.lat, g.lng], { radius: g.radius, color: meta.color, weight: 2, fillOpacity: 0.12 });
+      } else if (g.kind === "polygon") {
+        shape = L.polygon(g.points, { color: meta.color, weight: 2, fillOpacity: 0.12 });
+      } else {
+        return;
+      }
+      shape.bindPopup(`<b>${escapeHtml(d.label)}</b><br>${meta.label}<br><small>${escapeHtml(d.createdBy || "")}</small>`);
+      shape.addTo(map);
+      if (!layerToggles.zones.checked) map.removeLayer(shape);
+      zoneShapes[id] = shape;
     });
   });
 }
@@ -806,6 +1018,7 @@ function boot() {
   startLocationSharing();
   listenLocations();
   listenMarkers();
+  listenZones();
   listenMessages();
 }
 
