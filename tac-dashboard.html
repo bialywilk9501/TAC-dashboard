@@ -89,7 +89,30 @@
   .dot.live{ background:var(--teal); box-shadow:0 0 0 3px rgba(79,182,168,0.15); }
   .topbar .clock{ font-family:var(--font-mono); font-size:12px; color:var(--text-mid); }
   .topbar .spacer{ flex:1; }
-  .topbar .who{ font-family:var(--font-mono); font-size:12px; color:var(--text-hi); display:flex; align-items:center; gap:8px; }
+  .who-wrap{ position:relative; }
+  .topbar .who{
+    font-family:var(--font-mono); font-size:12px; color:var(--text-hi); display:flex; align-items:center; gap:8px;
+    background:transparent; border:1px solid transparent; padding:5px 8px; cursor:pointer;
+  }
+  .topbar .who:hover{ border-color:var(--line); }
+  .account-popover{
+    position:absolute; top:calc(100% + 8px); right:0; width:220px; background:var(--bg-1);
+    border:1px solid var(--line); box-shadow:0 10px 28px rgba(0,0,0,0.4); padding:14px; z-index:1200; display:none;
+  }
+  .account-popover.open{ display:block; }
+  .popover-title{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-lo); margin-bottom:9px; letter-spacing:0.4px; }
+  .color-swatches{ display:flex; gap:8px; flex-wrap:wrap; }
+  .color-swatches button{
+    width:26px; height:26px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0;
+  }
+  .color-swatches button.selected{ border-color:var(--text-hi); }
+  .popover-sep{ height:1px; background:var(--line); margin:12px 0; }
+  .popover-action{
+    width:100%; padding:8px; background:transparent; border:1px solid var(--line); color:var(--text-mid);
+    font-size:12px; cursor:pointer;
+  }
+  .popover-action:hover{ color:var(--text-hi); border-color:var(--text-mid); }
+  #account-popover-msg{ font-size:11px; color:var(--teal); margin-top:8px; font-family:var(--font-mono); min-height:12px; }
   .who .swatch{ width:9px; height:9px; border-radius:2px; }
   .btn-logout{
     background:transparent; border:1px solid var(--line); color:var(--text-mid);
@@ -208,10 +231,14 @@
     display:flex; align-items:center; justify-content:center; border-radius:50%; border:2px solid #0F1317;
     box-shadow:0 0 0 2px rgba(255,255,255,0.15);
   }
-  .unit-label{
-    font-family:var(--font-mono); font-size:10px; color:var(--text-hi); background:rgba(15,19,23,0.85);
-    padding:1px 5px; white-space:nowrap; border:1px solid var(--line); margin-top:2px;
+
+  /* Etykiety jednostek i znaczników jako natywne tooltipy Leaflet */
+  .leaflet-tooltip.tac-tooltip{
+    font-family:var(--font-mono); font-size:10.5px; color:var(--text-hi);
+    background:rgba(15,19,23,0.9); border:1px solid var(--line); border-radius:3px;
+    padding:2px 6px; box-shadow:none; white-space:nowrap;
   }
+  .leaflet-tooltip.tac-tooltip::before{ display:none; }
 
   [hidden]{ display:none !important; }
 
@@ -244,6 +271,7 @@
 
     <button class="btn-primary" id="login-submit">Zaloguj się</button>
     <button class="btn-ghost" id="login-toggle-mode">Nie masz konta? Zarejestruj się</button>
+    <button class="btn-ghost" id="login-forgot">Nie pamiętasz hasła?</button>
     <div id="login-error"></div>
   </div>
 </div>
@@ -257,7 +285,16 @@
     <div class="sep"></div>
     <div class="clock" id="clock">00:00:00Z</div>
     <div class="spacer"></div>
-    <div class="who"><span class="swatch" id="who-swatch"></span><span id="who-name">—</span></div>
+    <div class="who-wrap">
+      <button class="who" id="who-trigger"><span class="swatch" id="who-swatch"></span><span id="who-name">—</span></button>
+      <div class="account-popover" id="account-popover">
+        <div class="popover-title">KOLOR OPERATORA</div>
+        <div class="color-swatches" id="color-swatches"></div>
+        <div class="popover-sep"></div>
+        <button class="popover-action" id="btn-reset-password">Wyślij link resetujący hasło</button>
+        <div id="account-popover-msg"></div>
+      </div>
+    </div>
     <button class="btn-logout" id="btn-logout">Wyloguj</button>
   </header>
 
@@ -393,7 +430,7 @@ const firebaseConfig = {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, signOut
+  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, getDoc, addDoc, collection, onSnapshot,
@@ -444,6 +481,20 @@ document.getElementById("login-toggle-mode").addEventListener("click", () => {
   loginError.textContent = "";
 });
 
+document.getElementById("login-forgot").addEventListener("click", async () => {
+  const email = document.getElementById("login-email").value.trim();
+  loginError.textContent = "";
+  if (!email) { loginError.textContent = "Wpisz najpierw swój e-mail powyżej, potem kliknij ponownie."; return; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    loginError.style.color = "var(--teal)";
+    loginError.textContent = "Wysłano e-mail z linkiem do resetu hasła (sprawdź też SPAM).";
+  } catch (err) {
+    loginError.style.color = "";
+    loginError.textContent = translateAuthError(err.code) + `  [${err.code || err.message}]`;
+  }
+});
+
 document.getElementById("login-submit").addEventListener("click", async () => {
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
@@ -489,6 +540,57 @@ function translateAuthError(code) {
 document.getElementById("btn-logout").addEventListener("click", () => signOut(auth));
 
 // ---------------------------------------------------------------
+// MENU KONTA — kolor operatora + reset hasła
+// ---------------------------------------------------------------
+const accountPopover = document.getElementById("account-popover");
+
+document.getElementById("who-trigger").addEventListener("click", (e) => {
+  e.stopPropagation();
+  accountPopover.classList.toggle("open");
+  document.getElementById("account-popover-msg").textContent = "";
+});
+document.addEventListener("click", (e) => {
+  if (!accountPopover.contains(e.target) && e.target.id !== "who-trigger") {
+    accountPopover.classList.remove("open");
+  }
+});
+
+function renderColorSwatches() {
+  const wrap = document.getElementById("color-swatches");
+  wrap.innerHTML = "";
+  PALETTE.forEach(color => {
+    const btn = document.createElement("button");
+    btn.style.background = color;
+    if (currentProfile && currentProfile.color === color) btn.classList.add("selected");
+    btn.addEventListener("click", () => chooseOperatorColor(color));
+    wrap.appendChild(btn);
+  });
+}
+
+async function chooseOperatorColor(color) {
+  currentProfile.color = color;
+  document.getElementById("who-swatch").style.background = color;
+  renderColorSwatches();
+  await updateDoc(doc(db, "users", currentUser.uid), { color });
+  // Jeżeli operator ma już aktywną pozycję, od razu odśwież jej kolor na mapie.
+  try {
+    await updateDoc(doc(db, "locations", currentUser.uid), { color });
+  } catch (e) { /* brak dokumentu lokalizacji jeszcze — nic nie robimy */ }
+}
+
+document.getElementById("btn-reset-password").addEventListener("click", async () => {
+  const msg = document.getElementById("account-popover-msg");
+  try {
+    await sendPasswordResetEmail(auth, currentUser.email);
+    msg.style.color = "var(--teal)";
+    msg.textContent = "Wysłano link resetujący na " + currentUser.email;
+  } catch (err) {
+    msg.style.color = "var(--red)";
+    msg.textContent = "Błąd wysyłki: " + (err.code || err.message);
+  }
+});
+
+// ---------------------------------------------------------------
 // STAN AUTORYZACJI
 // ---------------------------------------------------------------
 onAuthStateChanged(auth, async (user) => {
@@ -505,6 +607,7 @@ onAuthStateChanged(auth, async (user) => {
     currentProfile = snap.data();
     document.getElementById("who-name").textContent = currentProfile.callsign;
     document.getElementById("who-swatch").style.background = currentProfile.color;
+    renderColorSwatches();
 
     document.getElementById("login-screen").hidden = true;
     document.getElementById("app").hidden = false;
@@ -604,13 +707,11 @@ function applyLayerVisibility(key) {
   const visible = layerToggles[key].checked;
   if (key === "units") {
     Object.values(unitMarkers).forEach(u => {
-      visible ? (u.dot.addTo(map), u.label.addTo(map)) : (map.removeLayer(u.dot), map.removeLayer(u.label));
+      visible ? u.dot.addTo(map) : map.removeLayer(u.dot);
     });
   }
   if (key === "markers") {
-    Object.values(pinMarkers).forEach(m => {
-      visible ? (m.pin.addTo(map), m.label.addTo(map)) : (map.removeLayer(m.pin), map.removeLayer(m.label));
-    });
+    Object.values(pinMarkers).forEach(m => visible ? m.pin.addTo(map) : map.removeLayer(m.pin));
   }
   if (key === "zones") {
     Object.values(zoneShapes).forEach(z => visible ? z.addTo(map) : map.removeLayer(z));
@@ -708,25 +809,21 @@ function listenLocations() {
       rosterList.appendChild(item);
 
       // -- map dot --
+      const dotColor = d.color || "#888";
+      const dotIcon = L.divIcon({
+        className: "", html: `<div class="unit-icon" style="width:16px;height:16px;background:${dotColor}"></div>`,
+        iconSize: [16, 16], iconAnchor: [8, 8]
+      });
       if (!unitMarkers[uid]) {
-        const icon = L.divIcon({
-          className: "", html: `<div class="unit-icon" style="width:16px;height:16px;background:${d.color || "#888"}"></div>`,
-          iconSize: [16, 16], iconAnchor: [8, 8]
-        });
-        const labelIcon = L.divIcon({
-          className: "", html: `<div class="unit-label">${escapeHtml(d.callsign || "?")}</div>`,
-          iconSize: [0, 0], iconAnchor: [-10, -6]
-        });
-        unitMarkers[uid] = {
-          dot: L.marker([d.lat, d.lng], { icon }).addTo(map),
-          label: L.marker([d.lat, d.lng], { icon: labelIcon, interactive: false }).addTo(map)
-        };
-        if (!layerToggles.units.checked) {
-          map.removeLayer(unitMarkers[uid].dot); map.removeLayer(unitMarkers[uid].label);
-        }
+        const dot = L.marker([d.lat, d.lng], { icon: dotIcon })
+          .bindTooltip(escapeHtml(d.callsign || "?"), { permanent: true, direction: "right", offset: [10, 0], className: "tac-tooltip" })
+          .addTo(map);
+        unitMarkers[uid] = { dot };
+        if (!layerToggles.units.checked) map.removeLayer(dot);
       } else {
         unitMarkers[uid].dot.setLatLng([d.lat, d.lng]);
-        unitMarkers[uid].label.setLatLng([d.lat, d.lng]);
+        unitMarkers[uid].dot.setIcon(dotIcon);
+        unitMarkers[uid].dot.setTooltipContent(escapeHtml(d.callsign || "?"));
       }
 
       // -- trasa sesji (tylko punkty zebrane od otwarcia dashboardu) --
@@ -803,7 +900,6 @@ function listenMarkers() {
       if (change.type === "removed") {
         if (pinMarkers[id]) {
           map.removeLayer(pinMarkers[id].pin);
-          map.removeLayer(pinMarkers[id].label);
           delete pinMarkers[id];
         }
         return;
@@ -813,20 +909,15 @@ function listenMarkers() {
         className: "", html: `<div class="divicon-marker" style="width:22px;height:22px;background:${meta.color};border-radius:3px;">${meta.letter}</div>`,
         iconSize: [22, 22], iconAnchor: [11, 11]
       });
-      const labelIcon = L.divIcon({
-        className: "", html: `<div class="unit-label">${escapeHtml(d.label || "")}</div>`,
-        iconSize: [0, 0], iconAnchor: [-16, -4]
-      });
       if (pinMarkers[id]) {
         pinMarkers[id].pin.setLatLng([d.lat, d.lng]);
-        pinMarkers[id].label.setLatLng([d.lat, d.lng]);
       } else {
         const pin = L.marker([d.lat, d.lng], { icon })
+          .bindTooltip(escapeHtml(d.label || ""), { permanent: true, direction: "top", offset: [0, -14], className: "tac-tooltip" })
           .bindPopup(`<b>${escapeHtml(d.label)}</b><br>${meta.label}<br><small>${escapeHtml(d.createdBy || "")}</small>`)
           .addTo(map);
-        const label = L.marker([d.lat, d.lng], { icon: labelIcon, interactive: false }).addTo(map);
-        pinMarkers[id] = { pin, label };
-        if (!layerToggles.markers.checked) { map.removeLayer(pin); map.removeLayer(label); }
+        pinMarkers[id] = { pin };
+        if (!layerToggles.markers.checked) map.removeLayer(pin);
       }
     });
   });
