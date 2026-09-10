@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TAC-Dashboard</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg-0:#0F1317;
+    --bg-1:#171C21;
+    --bg-2:#1E242A;
+    --line:#2A3138;
+    --text-hi:#E9EDF0;
+    --text-mid:#A6B0B8;
+    --text-lo:#6C7680;
+    --amber:#E8A33D;
+    --teal:#4FB6A8;
+    --red:#D9604A;
+    --blue:#5B8DEF;
+    --font-ui: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; height:100%; background:var(--bg-0); color:var(--text-hi);
+    font-family:var(--font-ui); overflow:hidden;
+  }
+  ::selection{ background:var(--amber); color:#1a1a1a; }
+  button{font-family:inherit;}
+  input,select{font-family:inherit;}
+
+  /* ---------- LOGIN ---------- */
+  #login-screen{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(79,182,168,0.06), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(232,163,61,0.06), transparent 45%),
+      var(--bg-0);
+  }
+  .login-card{
+    width:360px; padding:32px 28px; background:var(--bg-1);
+    border:1px solid var(--line); position:relative;
+  }
+  .login-card::before{
+    content:""; position:absolute; top:0; left:0; width:100%; height:3px;
+    background:linear-gradient(90deg,var(--teal),var(--amber));
+  }
+  .login-brand{ display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
+  .login-brand .mark{ color:var(--amber); font-family:var(--font-mono); font-size:20px; }
+  .login-brand h1{ font-size:20px; margin:0; font-weight:700; letter-spacing:0.3px; }
+  .login-sub{ color:var(--text-lo); font-size:12.5px; margin:0 0 24px 0; font-family:var(--font-mono); }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:11.5px; color:var(--text-mid); margin-bottom:6px; font-family:var(--font-mono); }
+  .field input{
+    width:100%; padding:10px 11px; background:var(--bg-0); border:1px solid var(--line);
+    color:var(--text-hi); font-size:14px; outline:none;
+  }
+  .field input:focus{ border-color:var(--teal); }
+  .btn-primary{
+    width:100%; padding:11px; margin-top:6px; background:var(--teal); color:#0F1317;
+    border:none; font-weight:600; font-size:14px; cursor:pointer; letter-spacing:0.2px;
+  }
+  .btn-primary:hover{ background:#61c4b7; }
+  .btn-ghost{
+    width:100%; padding:9px; margin-top:8px; background:transparent; color:var(--text-mid);
+    border:1px solid var(--line); font-size:12.5px; cursor:pointer;
+  }
+  .btn-ghost:hover{ color:var(--text-hi); border-color:var(--text-mid); }
+  #login-error{ color:var(--red); font-size:12.5px; margin-top:10px; min-height:14px; font-family:var(--font-mono); }
+  #login-screen[data-mode="register"] #register-fields{ display:block; }
+  #register-fields{ display:none; }
+
+  /* ---------- APP SHELL ---------- */
+  #app{ height:100%; display:flex; flex-direction:column; }
+  .topbar{
+    height:46px; flex:none; background:var(--bg-1); border-bottom:1px solid var(--line);
+    display:flex; align-items:center; padding:0 14px; gap:18px;
+  }
+  .topbar .brand{ font-weight:700; font-size:14.5px; letter-spacing:0.3px; }
+  .topbar .brand .mark{ color:var(--amber); }
+  .topbar .sep{ width:1px; height:18px; background:var(--line); }
+  .topbar .conn{ display:flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11.5px; color:var(--text-mid); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--text-lo); }
+  .dot.live{ background:var(--teal); box-shadow:0 0 0 3px rgba(79,182,168,0.15); }
+  .topbar .clock{ font-family:var(--font-mono); font-size:12px; color:var(--text-mid); }
+  .topbar .spacer{ flex:1; }
+  .topbar .who{ font-family:var(--font-mono); font-size:12px; color:var(--text-hi); display:flex; align-items:center; gap:8px; }
+  .who .swatch{ width:9px; height:9px; border-radius:2px; }
+  .btn-logout{
+    background:transparent; border:1px solid var(--line); color:var(--text-mid);
+    padding:5px 10px; font-size:11.5px; cursor:pointer;
+  }
+  .btn-logout:hover{ color:var(--red); border-color:var(--red); }
+
+  .layout{ flex:1; display:flex; min-height:0; }
+
+  /* ---------- LEFT SIDEBAR ---------- */
+  .sidebar-left{
+    width:230px; flex:none; background:var(--bg-1); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; overflow-y:auto;
+  }
+  .panel-title{
+    font-family:var(--font-mono); font-size:11px; color:var(--text-lo);
+    padding:12px 14px 6px; letter-spacing:0.5px;
+  }
+  .roster-item{
+    display:flex; align-items:center; gap:9px; padding:7px 14px; cursor:pointer; border-left:2px solid transparent;
+  }
+  .roster-item:hover{ background:var(--bg-2); }
+  .roster-item .swatch{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .roster-item .info{ min-width:0; flex:1; }
+  .roster-item .name{ font-size:13px; color:var(--text-hi); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .roster-item .meta{ font-size:10.5px; color:var(--text-lo); font-family:var(--font-mono); }
+  .roster-item.offline .name{ color:var(--text-lo); }
+  .roster-empty{ padding:10px 14px; color:var(--text-lo); font-size:12px; }
+
+  .layer-row{ display:flex; align-items:center; gap:9px; padding:6px 14px; font-size:13px; color:var(--text-mid); }
+  .layer-row input{ accent-color:var(--teal); }
+  .basemap-row{ display:flex; gap:6px; padding:6px 14px 14px; }
+  .basemap-btn{
+    flex:1; padding:6px 0; background:var(--bg-0); border:1px solid var(--line); color:var(--text-mid);
+    font-size:11.5px; cursor:pointer; font-family:var(--font-mono);
+  }
+  .basemap-btn.active{ border-color:var(--amber); color:var(--amber); }
+
+  /* ---------- MAP ---------- */
+  .map-wrap{ flex:1; position:relative; min-width:0; }
+  #map{ position:absolute; inset:0; background:#10151A; }
+  .leaflet-container{ font-family:var(--font-ui); background:#10151A; }
+
+  .map-toolbar{
+    position:absolute; top:12px; left:12px; z-index:500; display:flex; flex-direction:column; gap:6px;
+  }
+  .tool-btn{
+    width:36px; height:36px; background:var(--bg-1); border:1px solid var(--line); color:var(--text-mid);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:16px;
+  }
+  .tool-btn:hover{ color:var(--text-hi); }
+  .tool-btn.active{ border-color:var(--amber); color:var(--amber); background:var(--bg-2); }
+
+  .coord-readout{
+    position:absolute; bottom:10px; left:12px; z-index:500; font-family:var(--font-mono);
+    font-size:11px; color:var(--text-mid); background:rgba(23,28,33,0.85); padding:4px 8px; border:1px solid var(--line);
+  }
+
+  .placing-banner{
+    position:absolute; top:12px; left:56px; z-index:500; background:var(--amber); color:#1a1a1a;
+    font-size:12px; font-weight:600; padding:8px 12px; display:none; align-items:center; gap:10px;
+  }
+  .placing-banner button{ background:#1a1a1a; color:var(--amber); border:none; padding:3px 8px; font-size:11px; cursor:pointer; }
+
+  /* ---------- RIGHT SIDEBAR (CHAT) ---------- */
+  .sidebar-right{
+    width:280px; flex:none; background:var(--bg-1); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; transition:margin-right 0.15s ease;
+  }
+  .sidebar-right.collapsed{ margin-right:-280px; }
+  .chat-header{
+    height:40px; flex:none; display:flex; align-items:center; justify-content:space-between;
+    padding:0 12px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:11.5px; color:var(--text-mid);
+  }
+  .chat-header button{ background:none; border:none; color:var(--text-lo); cursor:pointer; font-size:14px; }
+  .chat-log{ flex:1; overflow-y:auto; padding:10px 12px; display:flex; flex-direction:column; gap:10px; }
+  .chat-msg .who{ font-family:var(--font-mono); font-size:10.5px; margin-bottom:2px; display:flex; gap:6px; align-items:center; }
+  .chat-msg .who .swatch{ width:7px; height:7px; border-radius:50%; }
+  .chat-msg .who .time{ color:var(--text-lo); }
+  .chat-msg .text{ font-size:13px; color:var(--text-hi); line-height:1.4; word-wrap:break-word; }
+  .chat-input-row{ flex:none; display:flex; border-top:1px solid var(--line); }
+  .chat-input-row input{
+    flex:1; background:var(--bg-0); border:none; padding:10px 11px; color:var(--text-hi); font-size:13px; outline:none;
+  }
+  .chat-input-row button{
+    background:var(--bg-2); border:none; color:var(--teal); padding:0 14px; cursor:pointer; font-size:13px;
+  }
+  .chat-toggle-collapsed{
+    position:absolute; top:12px; right:12px; z-index:500; width:36px; height:36px; background:var(--bg-1);
+    border:1px solid var(--line); color:var(--text-mid); display:none; align-items:center; justify-content:center; cursor:pointer;
+  }
+
+  /* ---------- MODAL ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(10,12,14,0.6); z-index:1000; display:none; align-items:center; justify-content:center;
+  }
+  .modal-overlay.open{ display:flex; }
+  .modal{ width:300px; background:var(--bg-1); border:1px solid var(--line); padding:20px; }
+  .modal h3{ margin:0 0 14px; font-size:14px; color:var(--text-hi); }
+  .modal .field{ margin-bottom:12px; }
+  .modal select{
+    width:100%; padding:9px 10px; background:var(--bg-0); border:1px solid var(--line); color:var(--text-hi); font-size:13px;
+  }
+  .modal-actions{ display:flex; gap:8px; margin-top:16px; }
+  .modal-actions button{ flex:1; padding:9px; font-size:12.5px; cursor:pointer; border:1px solid var(--line); background:transparent; color:var(--text-mid); }
+  .modal-actions button.confirm{ background:var(--amber); border-color:var(--amber); color:#1a1a1a; font-weight:600; }
+
+  .divicon-marker{
+    display:flex; align-items:center; justify-content:center; color:#0F1317; font-family:var(--font-mono);
+    font-size:11px; font-weight:700; border:2px solid rgba(15,19,23,0.6);
+  }
+  .unit-icon{
+    display:flex; align-items:center; justify-content:center; border-radius:50%; border:2px solid #0F1317;
+    box-shadow:0 0 0 2px rgba(255,255,255,0.15);
+  }
+  .unit-label{
+    font-family:var(--font-mono); font-size:10px; color:var(--text-hi); background:rgba(15,19,23,0.85);
+    padding:1px 5px; white-space:nowrap; border:1px solid var(--line); margin-top:2px;
+  }
+
+  [hidden]{ display:none !important; }
+
+  @media (max-width: 820px){
+    .sidebar-left{ position:absolute; z-index:600; height:100%; }
+    .sidebar-right{ position:absolute; right:0; z-index:600; height:100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================= LOGIN ======================= -->
+<div id="login-screen" data-mode="login">
+  <div class="login-card">
+    <div class="login-brand"><span class="mark">▲</span><h1>TAC-DASHBOARD</h1></div>
+    <p class="login-sub">SYTUACYJNA ŚWIADOMOŚĆ ZESPOŁU // LOGOWANIE</p>
+
+    <div class="field">
+      <label>E-MAIL</label>
+      <input type="email" id="login-email" autocomplete="username" placeholder="operator@zespol.pl">
+    </div>
+    <div class="field">
+      <label>HASŁO</label>
+      <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <div id="register-fields" class="field">
+      <label>SYGNAŁ WYWOŁAWCZY (CALLSIGN)</label>
+      <input type="text" id="login-callsign" placeholder="np. LIS-1">
+    </div>
+
+    <button class="btn-primary" id="login-submit">Zaloguj się</button>
+    <button class="btn-ghost" id="login-toggle-mode">Nie masz konta? Zarejestruj się</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<!-- ======================= APP ======================= -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand"><span class="mark">▲</span> TAC-DASHBOARD</div>
+    <div class="sep"></div>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">ŁĄCZENIE…</span></div>
+    <div class="sep"></div>
+    <div class="clock" id="clock">00:00:00Z</div>
+    <div class="spacer"></div>
+    <div class="who"><span class="swatch" id="who-swatch"></span><span id="who-name">—</span></div>
+    <button class="btn-logout" id="btn-logout">Wyloguj</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="panel-title">ZESPÓŁ — NA ŻYWO</div>
+      <div id="roster-list"><div class="roster-empty">Brak aktywnych jednostek…</div></div>
+
+      <div class="panel-title">WARSTWY</div>
+      <label class="layer-row"><input type="checkbox" id="layer-units" checked> Jednostki</label>
+      <label class="layer-row"><input type="checkbox" id="layer-markers" checked> Znaczniki</label>
+      <label class="layer-row"><input type="checkbox" id="layer-tracks" checked> Trasy (sesja)</label>
+
+      <div class="panel-title">MAPA BAZOWA</div>
+      <div class="basemap-row">
+        <button class="basemap-btn active" data-base="street">ULICE</button>
+        <button class="basemap-btn" data-base="sat">SATELITA</button>
+      </div>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+
+      <div class="map-toolbar">
+        <button class="tool-btn" id="tool-locate" title="Wyśrodkuj na mnie">◎</button>
+        <button class="tool-btn" id="tool-marker" title="Dodaj znacznik">✛</button>
+      </div>
+
+      <div class="placing-banner" id="placing-banner">
+        Kliknij na mapie, aby postawić znacznik
+        <button id="placing-cancel">Anuluj</button>
+      </div>
+
+      <div class="coord-readout" id="coord-readout">LAT — · LON —</div>
+
+      <button class="chat-toggle-collapsed" id="chat-show">💬</button>
+    </main>
+
+    <aside class="sidebar-right" id="chat-panel">
+      <div class="chat-header">
+        <span>ŁĄCZNOŚĆ ZESPOŁU</span>
+        <button id="chat-hide">✕</button>
+      </div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Napisz wiadomość…" maxlength="500">
+        <button id="chat-send">Wyślij</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- ======================= MARKER MODAL ======================= -->
+<div class="modal-overlay" id="marker-modal">
+  <div class="modal">
+    <h3>Nowy znacznik</h3>
+    <div class="field">
+      <label>ETYKIETA</label>
+      <input type="text" id="marker-label" placeholder="np. Punkt zbiórki" maxlength="60">
+    </div>
+    <div class="field">
+      <label>TYP</label>
+      <select id="marker-type">
+        <option value="objective">Cel (O)</option>
+        <option value="hazard">Zagrożenie (Z)</option>
+        <option value="support">Wsparcie (W)</option>
+        <option value="recon">Rozpoznanie (R)</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button id="marker-cancel">Anuluj</button>
+      <button class="confirm" id="marker-confirm">Postaw znacznik</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script type="module">
+// =====================================================================
+// KONFIGURACJA FIREBASE — wklej tu dane swojego projektu.
+// Firebase Console -> Ustawienia projektu -> Twoje aplikacje -> SDK config
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "WKLEJ_TUTAJ",
+  authDomain: "WKLEJ_TUTAJ.firebaseapp.com",
+  projectId: "WKLEJ_TUTAJ",
+  storageBucket: "WKLEJ_TUTAJ.appspot.com",
+  messagingSenderId: "WKLEJ_TUTAJ",
+  appId: "WKLEJ_TUTAJ"
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+  createUserWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore, doc, setDoc, getDoc, addDoc, collection, onSnapshot,
+  serverTimestamp, query, orderBy, limit, updateDoc
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const PALETTE = ["#4FB6A8","#E8A33D","#5B8DEF","#D9604A","#B18CD9","#7FBF6A"];
+const MARKER_TYPES = {
+  objective:{ letter:"O", color:"#E8A33D", label:"Cel" },
+  hazard:{ letter:"Z", color:"#D9604A", label:"Zagrożenie" },
+  support:{ letter:"W", color:"#4FB6A8", label:"Wsparcie" },
+  recon:{ letter:"R", color:"#8B96A3", label:"Rozpoznanie" }
+};
+
+let currentUser = null;
+let currentProfile = null;
+let watchId = null;
+let unsubLocations = null, unsubMarkers = null, unsubMessages = null;
+const trails = {};      // uid -> [ [lat,lng], ... ] (sesja bieżąca)
+const trailLines = {};  // uid -> L.Polyline
+const unitMarkers = {}; // uid -> { dot: L.Marker, label: L.Marker }
+const pinMarkers = {};  // markerId -> L.Marker
+
+// ---------------------------------------------------------------
+// LOGIN / REJESTRACJA
+// ---------------------------------------------------------------
+const loginScreen = document.getElementById("login-screen");
+const loginError = document.getElementById("login-error");
+
+document.getElementById("login-toggle-mode").addEventListener("click", () => {
+  const isLogin = loginScreen.dataset.mode === "login";
+  loginScreen.dataset.mode = isLogin ? "register" : "login";
+  document.getElementById("login-submit").textContent = isLogin ? "Utwórz konto" : "Zaloguj się";
+  document.getElementById("login-toggle-mode").textContent = isLogin
+    ? "Masz już konto? Zaloguj się"
+    : "Nie masz konta? Zarejestruj się";
+  loginError.textContent = "";
+});
+
+document.getElementById("login-submit").addEventListener("click", async () => {
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  const callsign = document.getElementById("login-callsign").value.trim();
+  loginError.textContent = "";
+  if (!email || !password) { loginError.textContent = "Podaj e-mail i hasło."; return; }
+
+  try {
+    if (loginScreen.dataset.mode === "register") {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+      await setDoc(doc(db, "users", cred.user.uid), {
+        email,
+        callsign: callsign || email.split("@")[0],
+        color,
+        createdAt: serverTimestamp()
+      });
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
+  } catch (err) {
+    loginError.textContent = translateAuthError(err.code);
+  }
+});
+
+function translateAuthError(code) {
+  const map = {
+    "auth/invalid-email": "Nieprawidłowy adres e-mail.",
+    "auth/user-not-found": "Nie znaleziono konta.",
+    "auth/wrong-password": "Błędne hasło.",
+    "auth/invalid-credential": "Błędny e-mail lub hasło.",
+    "auth/email-already-in-use": "Ten e-mail jest już zarejestrowany.",
+    "auth/weak-password": "Hasło musi mieć min. 6 znaków."
+  };
+  return map[code] || "Wystąpił błąd. Spróbuj ponownie.";
+}
+
+document.getElementById("btn-logout").addEventListener("click", () => signOut(auth));
+
+// ---------------------------------------------------------------
+// STAN AUTORYZACJI
+// ---------------------------------------------------------------
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    currentUser = user;
+    let snap = await getDoc(doc(db, "users", user.uid));
+    if (!snap.exists()) {
+      const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+      await setDoc(doc(db, "users", user.uid), {
+        email: user.email, callsign: user.email.split("@")[0], color, createdAt: serverTimestamp()
+      });
+      snap = await getDoc(doc(db, "users", user.uid));
+    }
+    currentProfile = snap.data();
+    document.getElementById("who-name").textContent = currentProfile.callsign;
+    document.getElementById("who-swatch").style.background = currentProfile.color;
+
+    document.getElementById("login-screen").hidden = true;
+    document.getElementById("app").hidden = false;
+    boot();
+  } else {
+    cleanup();
+    document.getElementById("app").hidden = true;
+    document.getElementById("login-screen").hidden = false;
+  }
+});
+
+function cleanup() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  if (unsubLocations) unsubLocations();
+  if (unsubMarkers) unsubMarkers();
+  if (unsubMessages) unsubMessages();
+  Object.keys(trails).forEach(k => delete trails[k]);
+}
+
+// ---------------------------------------------------------------
+// ZEGAR (ZULU / UTC)
+// ---------------------------------------------------------------
+setInterval(() => {
+  const d = new Date();
+  const t = d.toISOString().substr(11, 8) + "Z";
+  document.getElementById("clock").textContent = t;
+}, 1000);
+
+// ---------------------------------------------------------------
+// MAPA
+// ---------------------------------------------------------------
+let map, baseStreet, baseSat;
+
+function initMap() {
+  map = L.map("map", { zoomControl: false, attributionControl: true }).setView([52.2297, 21.0122], 6);
+
+  baseStreet = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+
+  baseSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19, attribution: "Tiles &copy; Esri"
+  });
+
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+
+  map.on("mousemove", (e) => {
+    document.getElementById("coord-readout").textContent =
+      `LAT ${e.latlng.lat.toFixed(5)} · LON ${e.latlng.lng.toFixed(5)}`;
+  });
+
+  map.on("click", (e) => {
+    if (placingMarker) openMarkerModal(e.latlng);
+  });
+}
+
+document.querySelectorAll(".basemap-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".basemap-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    if (btn.dataset.base === "sat") {
+      map.removeLayer(baseStreet); baseSat.addTo(map);
+    } else {
+      map.removeLayer(baseSat); baseStreet.addTo(map);
+    }
+  });
+});
+
+// ---------------------------------------------------------------
+// WARSTWY WIDOCZNOŚCI
+// ---------------------------------------------------------------
+const layerToggles = {
+  units: document.getElementById("layer-units"),
+  markers: document.getElementById("layer-markers"),
+  tracks: document.getElementById("layer-tracks")
+};
+Object.entries(layerToggles).forEach(([key, el]) => {
+  el.addEventListener("change", () => applyLayerVisibility(key));
+});
+function applyLayerVisibility(key) {
+  const visible = layerToggles[key].checked;
+  if (key === "units") {
+    Object.values(unitMarkers).forEach(u => {
+      visible ? (u.dot.addTo(map), u.label.addTo(map)) : (map.removeLayer(u.dot), map.removeLayer(u.label));
+    });
+  }
+  if (key === "markers") {
+    Object.values(pinMarkers).forEach(m => visible ? m.addTo(map) : map.removeLayer(m));
+  }
+  if (key === "tracks") {
+    Object.values(trailLines).forEach(l => visible ? l.addTo(map) : map.removeLayer(l));
+  }
+}
+
+// ---------------------------------------------------------------
+// UDOSTĘPNIANIE WŁASNEJ LOKALIZACJI
+// ---------------------------------------------------------------
+// Minimalny odstęp między zapisami lokalizacji do Firestore (ms).
+// Chroni darmowy limit zapisów (Spark plan) przy watchPosition zgłaszającym
+// zmiany bardzo często. Zwiększ, jeśli masz dużo operatorów online naraz.
+const LOCATION_WRITE_INTERVAL_MS = 8000;
+let lastLocationWriteAt = 0;
+let pendingLocationWrite = null;
+
+function startLocationSharing() {
+  if (!navigator.geolocation) {
+    setConn(false, "BRAK GPS W PRZEGLĄDARCE");
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition((pos) => {
+    setConn(true, "NA ŻYWO");
+    const { latitude, longitude, heading } = pos.coords;
+    scheduleLocationWrite(latitude, longitude, heading || 0);
+  }, (err) => {
+    setConn(false, "BRAK DOSTĘPU DO LOKALIZACJI");
+  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+}
+
+function scheduleLocationWrite(lat, lng, heading) {
+  const payload = { lat, lng, heading };
+  const now = Date.now();
+  const elapsed = now - lastLocationWriteAt;
+
+  if (elapsed >= LOCATION_WRITE_INTERVAL_MS) {
+    writeLocation(payload);
+  } else {
+    // Zapamiętaj najnowszą pozycję i wyślij ją, gdy minie okno throttlingu —
+    // dzięki temu ostatnia znana pozycja zawsze trafia do bazy.
+    pendingLocationWrite = payload;
+    if (!scheduleLocationWrite._timer) {
+      scheduleLocationWrite._timer = setTimeout(() => {
+        scheduleLocationWrite._timer = null;
+        if (pendingLocationWrite) {
+          const p = pendingLocationWrite;
+          pendingLocationWrite = null;
+          writeLocation(p);
+        }
+      }, LOCATION_WRITE_INTERVAL_MS - elapsed);
+    }
+  }
+}
+
+async function writeLocation({ lat, lng, heading }) {
+  lastLocationWriteAt = Date.now();
+  await setDoc(doc(db, "locations", currentUser.uid), {
+    lat, lng, heading,
+    callsign: currentProfile.callsign, color: currentProfile.color,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+function setConn(ok, text) {
+  document.getElementById("conn-dot").classList.toggle("live", ok);
+  document.getElementById("conn-text").textContent = text;
+}
+
+// ---------------------------------------------------------------
+// NASŁUCH LOKALIZACJI ZESPOŁU
+// ---------------------------------------------------------------
+function listenLocations() {
+  unsubLocations = onSnapshot(collection(db, "locations"), (snap) => {
+    const rosterList = document.getElementById("roster-list");
+    rosterList.innerHTML = "";
+    if (snap.empty) rosterList.innerHTML = '<div class="roster-empty">Brak aktywnych jednostek…</div>';
+
+    snap.forEach((docSnap) => {
+      const uid = docSnap.id;
+      const d = docSnap.data();
+      if (typeof d.lat !== "number") return;
+
+      const isStale = !d.updatedAt || (Date.now() - d.updatedAt.toMillis() > 120000);
+
+      // -- roster --
+      const item = document.createElement("div");
+      item.className = "roster-item" + (isStale ? " offline" : "");
+      item.innerHTML = `<span class="swatch" style="background:${d.color || "#888"}"></span>
+        <div class="info"><div class="name">${escapeHtml(d.callsign || "operator")}</div>
+        <div class="meta">${isStale ? "OFFLINE" : "ONLINE"}</div></div>`;
+      item.addEventListener("click", () => map.setView([d.lat, d.lng], 14));
+      rosterList.appendChild(item);
+
+      // -- map dot --
+      if (!unitMarkers[uid]) {
+        const icon = L.divIcon({
+          className: "", html: `<div class="unit-icon" style="width:16px;height:16px;background:${d.color || "#888"}"></div>`,
+          iconSize: [16, 16], iconAnchor: [8, 8]
+        });
+        const labelIcon = L.divIcon({
+          className: "", html: `<div class="unit-label">${escapeHtml(d.callsign || "?")}</div>`,
+          iconSize: [0, 0], iconAnchor: [-10, -6]
+        });
+        unitMarkers[uid] = {
+          dot: L.marker([d.lat, d.lng], { icon }).addTo(map),
+          label: L.marker([d.lat, d.lng], { icon: labelIcon, interactive: false }).addTo(map)
+        };
+        if (!layerToggles.units.checked) {
+          map.removeLayer(unitMarkers[uid].dot); map.removeLayer(unitMarkers[uid].label);
+        }
+      } else {
+        unitMarkers[uid].dot.setLatLng([d.lat, d.lng]);
+        unitMarkers[uid].label.setLatLng([d.lat, d.lng]);
+      }
+
+      // -- trasa sesji (tylko punkty zebrane od otwarcia dashboardu) --
+      if (!trails[uid]) trails[uid] = [];
+      const last = trails[uid][trails[uid].length - 1];
+      if (!last || last[0] !== d.lat || last[1] !== d.lng) {
+        trails[uid].push([d.lat, d.lng]);
+        if (trails[uid].length > 300) trails[uid].shift();
+        if (!trailLines[uid]) {
+          trailLines[uid] = L.polyline(trails[uid], { color: d.color || "#888", weight: 2, opacity: 0.6, dashArray: "4,4" });
+          if (layerToggles.tracks.checked) trailLines[uid].addTo(map);
+        } else {
+          trailLines[uid].setLatLngs(trails[uid]);
+        }
+      }
+    });
+  });
+}
+
+document.getElementById("tool-locate").addEventListener("click", () => {
+  const mine = unitMarkers[currentUser?.uid];
+  if (mine) map.setView(mine.dot.getLatLng(), 15);
+  else if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    });
+  }
+});
+
+// ---------------------------------------------------------------
+// ZNACZNIKI
+// ---------------------------------------------------------------
+let placingMarker = false;
+let pendingLatLng = null;
+
+document.getElementById("tool-marker").addEventListener("click", () => {
+  placingMarker = !placingMarker;
+  document.getElementById("tool-marker").classList.toggle("active", placingMarker);
+  document.getElementById("placing-banner").style.display = placingMarker ? "flex" : "none";
+});
+document.getElementById("placing-cancel").addEventListener("click", () => {
+  placingMarker = false;
+  document.getElementById("tool-marker").classList.remove("active");
+  document.getElementById("placing-banner").style.display = "none";
+});
+
+function openMarkerModal(latlng) {
+  pendingLatLng = latlng;
+  document.getElementById("marker-modal").classList.add("open");
+}
+document.getElementById("marker-cancel").addEventListener("click", () => {
+  document.getElementById("marker-modal").classList.remove("open");
+});
+document.getElementById("marker-confirm").addEventListener("click", async () => {
+  const label = document.getElementById("marker-label").value.trim() || "Bez nazwy";
+  const type = document.getElementById("marker-type").value;
+  await addDoc(collection(db, "markers"), {
+    label, type, lat: pendingLatLng.lat, lng: pendingLatLng.lng,
+    createdBy: currentProfile.callsign, createdAt: serverTimestamp()
+  });
+  document.getElementById("marker-modal").classList.remove("open");
+  document.getElementById("marker-label").value = "";
+  placingMarker = false;
+  document.getElementById("tool-marker").classList.remove("active");
+  document.getElementById("placing-banner").style.display = "none";
+});
+
+function listenMarkers() {
+  unsubMarkers = onSnapshot(collection(db, "markers"), (snap) => {
+    snap.docChanges().forEach((change) => {
+      const id = change.doc.id;
+      const d = change.doc.data();
+      if (change.type === "removed") {
+        if (pinMarkers[id]) { map.removeLayer(pinMarkers[id]); delete pinMarkers[id]; }
+        return;
+      }
+      const meta = MARKER_TYPES[d.type] || MARKER_TYPES.objective;
+      const icon = L.divIcon({
+        className: "", html: `<div class="divicon-marker" style="width:22px;height:22px;background:${meta.color};border-radius:3px;">${meta.letter}</div>`,
+        iconSize: [22, 22], iconAnchor: [11, 11]
+      });
+      if (pinMarkers[id]) {
+        pinMarkers[id].setLatLng([d.lat, d.lng]);
+      } else {
+        pinMarkers[id] = L.marker([d.lat, d.lng], { icon })
+          .bindPopup(`<b>${escapeHtml(d.label)}</b><br>${meta.label}<br><small>${escapeHtml(d.createdBy || "")}</small>`)
+          .addTo(map);
+        if (!layerToggles.markers.checked) map.removeLayer(pinMarkers[id]);
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------
+// CZAT
+// ---------------------------------------------------------------
+document.getElementById("chat-hide").addEventListener("click", () => {
+  document.getElementById("chat-panel").classList.add("collapsed");
+  document.getElementById("chat-show").style.display = "flex";
+});
+document.getElementById("chat-show").addEventListener("click", () => {
+  document.getElementById("chat-panel").classList.remove("collapsed");
+  document.getElementById("chat-show").style.display = "none";
+});
+
+function listenMessages() {
+  const q = query(collection(db, "messages"), orderBy("timestamp", "desc"), limit(100));
+  unsubMessages = onSnapshot(q, (snap) => {
+    const log = document.getElementById("chat-log");
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    items.reverse();
+    log.innerHTML = items.map(m => {
+      const time = m.timestamp ? new Date(m.timestamp.toMillis()).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }) : "";
+      return `<div class="chat-msg">
+        <div class="who"><span class="swatch" style="background:${m.color || "#888"}"></span>${escapeHtml(m.callsign || "?")}<span class="time">${time}</span></div>
+        <div class="text">${escapeHtml(m.text)}</div>
+      </div>`;
+    }).join("");
+    log.scrollTop = log.scrollHeight;
+  });
+}
+
+async function sendMessage() {
+  const input = document.getElementById("chat-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  await addDoc(collection(db, "messages"), {
+    text, callsign: currentProfile.callsign, color: currentProfile.color,
+    uid: currentUser.uid, timestamp: serverTimestamp()
+  });
+}
+document.getElementById("chat-send").addEventListener("click", sendMessage);
+document.getElementById("chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendMessage();
+});
+
+// ---------------------------------------------------------------
+// START
+// ---------------------------------------------------------------
+function boot() {
+  if (!map) initMap();
+  setConn(false, "ŁĄCZENIE…");
+  startLocationSharing();
+  listenLocations();
+  listenMarkers();
+  listenMessages();
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
