@@ -213,6 +213,27 @@
     padding:0 12px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:11.5px; color:var(--text-mid);
   }
   .chat-header button{ background:none; border:none; color:var(--text-lo); cursor:pointer; font-size:14px; }
+  .channel-row{
+    flex:none; display:flex; gap:6px; padding:8px 12px; border-bottom:1px solid var(--line);
+    overflow-x:auto; scrollbar-width:none;
+  }
+  .channel-row::-webkit-scrollbar{ display:none; }
+  .channel-chip{
+    flex:none; font-family:var(--font-mono); font-size:11px; color:var(--text-mid); background:var(--bg-0);
+    border:1px solid var(--line); padding:5px 10px; cursor:pointer; white-space:nowrap;
+  }
+  .channel-chip:hover{ color:var(--text-hi); }
+  .channel-chip.active{ border-color:var(--teal); color:var(--teal); }
+  .channel-chip.channel-add{ color:var(--amber); border-style:dashed; margin-left:auto; }
+  .room-members-list{
+    max-height:180px; overflow-y:auto; border:1px solid var(--line); background:var(--bg-0);
+  }
+  .room-member-row{ display:flex; align-items:center; gap:9px; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; }
+  .room-member-row:last-child{ border-bottom:none; }
+  .room-member-row input{ accent-color:var(--teal); }
+  .room-member-row .swatch{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .room-member-row .name{ flex:1; color:var(--text-hi); }
+  .room-members-empty{ padding:12px; color:var(--text-lo); font-size:12px; }
   .chat-log{ flex:1; overflow-y:auto; padding:10px 12px; display:flex; flex-direction:column; gap:10px; }
   .chat-msg .who{ font-family:var(--font-mono); font-size:10.5px; margin-bottom:2px; display:flex; gap:6px; align-items:center; }
   .chat-msg .who .swatch{ width:7px; height:7px; border-radius:50%; }
@@ -438,8 +459,12 @@
 
     <aside class="sidebar-right collapsed" id="chat-panel">
       <div class="chat-header">
-        <span>ŁĄCZNOŚĆ ZESPOŁU</span>
+        <span id="chat-header-title">ŁĄCZNOŚĆ ZESPOŁU</span>
         <button id="chat-hide">✕</button>
+      </div>
+      <div class="channel-row" id="channel-row">
+        <button class="channel-chip active" id="channel-team" data-type="team">Zespół</button>
+        <button class="channel-chip channel-add" id="channel-add" title="Nowy pokój prywatny">+ Pokój</button>
       </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-input-row">
@@ -498,6 +523,25 @@
   </div>
 </div>
 
+<!-- ======================= NOWY POKÓJ (PRYWATNY CZAT) ======================= -->
+<div class="modal-overlay" id="room-modal">
+  <div class="modal">
+    <h3>Nowy pokój prywatny</h3>
+    <div class="field">
+      <label>NAZWA POKOJU</label>
+      <input type="text" id="room-name" placeholder="np. Dowództwo" maxlength="40">
+    </div>
+    <div class="field">
+      <label>UCZESTNICY</label>
+      <div class="room-members-list" id="room-members-list"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="room-cancel">Anuluj</button>
+      <button class="confirm" id="room-confirm">Utwórz pokój</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
 <script type="module">
@@ -522,8 +566,8 @@ import {
   createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, setDoc, getDoc, addDoc, collection, onSnapshot,
-  serverTimestamp, query, orderBy, limit, updateDoc
+  getFirestore, doc, setDoc, getDoc, getDocs, addDoc, collection, onSnapshot,
+  serverTimestamp, query, orderBy, limit, updateDoc, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
@@ -755,6 +799,8 @@ onAuthStateChanged(auth, async (user) => {
     cleanup();
     document.getElementById("app").hidden = true;
     document.getElementById("login-screen").hidden = false;
+    document.getElementById("login-password").value = "";
+    document.getElementById("login-error").textContent = "";
   }
 });
 
@@ -765,6 +811,9 @@ function cleanup() {
   if (unsubMarkers) unsubMarkers();
   if (unsubMessages) unsubMessages();
   if (unsubZones) unsubZones();
+  if (unsubRooms) unsubRooms();
+  currentChannel = { type: "team" };
+  allUsersCache = [];
   Object.keys(trails).forEach(k => delete trails[k]);
 }
 
@@ -1228,8 +1277,107 @@ document.getElementById("chat-show").addEventListener("click", () => {
   closeSidebarDrawer();
 });
 
+// ---------------------------------------------------------------
+// KANAŁY: ZESPÓŁ + PRYWATNE POKOJE
+// ---------------------------------------------------------------
+let currentChannel = { type: "team" };
+let unsubRooms = null;
+let allUsersCache = [];
+
+function messagesCollectionRef() {
+  return currentChannel.type === "room"
+    ? collection(db, "rooms", currentChannel.id, "messages")
+    : collection(db, "messages");
+}
+
+function switchChannel(channel) {
+  currentChannel = channel;
+  document.querySelectorAll(".channel-chip[data-room-id], #channel-team").forEach(el => {
+    const isActive = (channel.type === "team" && el.id === "channel-team") ||
+      (channel.type === "room" && el.dataset.roomId === channel.id);
+    el.classList.toggle("active", isActive);
+  });
+  document.getElementById("chat-header-title").textContent =
+    channel.type === "room" ? ("POKÓJ: " + channel.name.toUpperCase()) : "ŁĄCZNOŚĆ ZESPOŁU";
+  if (unsubMessages) unsubMessages();
+  listenMessages();
+}
+
+document.getElementById("channel-team").addEventListener("click", () => switchChannel({ type: "team" }));
+
+function listenRooms() {
+  const q = query(collection(db, "rooms"), where("members", "array-contains", currentUser.uid));
+  unsubRooms = onSnapshot(q, (snap) => {
+    const row = document.getElementById("channel-row");
+    row.querySelectorAll(".channel-chip[data-room-id]").forEach(el => el.remove());
+    const addBtn = document.getElementById("channel-add");
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const chip = document.createElement("button");
+      chip.className = "channel-chip";
+      chip.dataset.roomId = docSnap.id;
+      chip.textContent = d.name || "Pokój";
+      if (currentChannel.type === "room" && currentChannel.id === docSnap.id) chip.classList.add("active");
+      chip.addEventListener("click", () => switchChannel({ type: "room", id: docSnap.id, name: d.name || "Pokój" }));
+      row.insertBefore(chip, addBtn);
+    });
+    // Jeśli aktualnie otwarty pokój został usunięty / straciliśmy do niego dostęp — wróć do czatu zespołu.
+    if (currentChannel.type === "room" && !snap.docs.some(d => d.id === currentChannel.id)) {
+      switchChannel({ type: "team" });
+    }
+  });
+}
+
+// ---------------------------------------------------------------
+// TWORZENIE NOWEGO POKOJU
+// ---------------------------------------------------------------
+document.getElementById("channel-add").addEventListener("click", openRoomModal);
+
+async function openRoomModal() {
+  document.getElementById("room-modal").classList.add("open");
+  document.getElementById("room-name").value = "";
+  const list = document.getElementById("room-members-list");
+  list.innerHTML = '<div class="room-members-empty">Wczytywanie operatorów…</div>';
+  try {
+    if (allUsersCache.length === 0) {
+      const snap = await getDocs(collection(db, "users"));
+      allUsersCache = [];
+      snap.forEach(d => { if (d.id !== currentUser.uid) allUsersCache.push({ uid: d.id, ...d.data() }); });
+    }
+    if (allUsersCache.length === 0) {
+      list.innerHTML = '<div class="room-members-empty">Brak innych zarejestrowanych operatorów.</div>';
+      return;
+    }
+    list.innerHTML = "";
+    allUsersCache.forEach(u => {
+      const row = document.createElement("label");
+      row.className = "room-member-row";
+      row.innerHTML = `<input type="checkbox" value="${u.uid}">
+        <span class="swatch" style="background:${u.color || "#888"}"></span>
+        <span class="name">${escapeHtml(u.callsign || u.email || "operator")}</span>`;
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="room-members-empty">Nie udało się wczytać listy operatorów.</div>';
+  }
+}
+document.getElementById("room-cancel").addEventListener("click", () => {
+  document.getElementById("room-modal").classList.remove("open");
+});
+document.getElementById("room-confirm").addEventListener("click", async () => {
+  const name = document.getElementById("room-name").value.trim();
+  if (!name) return;
+  const selected = Array.from(document.querySelectorAll("#room-members-list input:checked")).map(i => i.value);
+  const members = Array.from(new Set([currentUser.uid, ...selected]));
+  const ref = await addDoc(collection(db, "rooms"), {
+    name, members, createdBy: currentProfile.callsign, createdAt: serverTimestamp()
+  });
+  document.getElementById("room-modal").classList.remove("open");
+  switchChannel({ type: "room", id: ref.id, name });
+});
+
 function listenMessages() {
-  const q = query(collection(db, "messages"), orderBy("timestamp", "desc"), limit(100));
+  const q = query(messagesCollectionRef(), orderBy("timestamp", "desc"), limit(100));
   unsubMessages = onSnapshot(q, (snap) => {
     const log = document.getElementById("chat-log");
     const items = [];
@@ -1251,7 +1399,7 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
-  await addDoc(collection(db, "messages"), {
+  await addDoc(messagesCollectionRef(), {
     text, callsign: currentProfile.callsign, color: currentProfile.color,
     uid: currentUser.uid, timestamp: serverTimestamp()
   });
@@ -1271,6 +1419,7 @@ function boot() {
   listenLocations();
   listenMarkers();
   listenZones();
+  listenRooms();
   listenMessages();
 }
 
