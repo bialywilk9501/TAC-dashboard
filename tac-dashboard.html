@@ -214,11 +214,22 @@
   }
   .chat-header button{ background:none; border:none; color:var(--text-lo); cursor:pointer; font-size:14px; }
   .room-item{
-    padding:7px 14px; font-size:13px; color:var(--text-mid); cursor:pointer;
-    border-left:2px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    display:flex; align-items:center; gap:4px; padding:7px 10px 7px 14px; font-size:13px; color:var(--text-mid); cursor:pointer;
+    border-left:2px solid transparent;
   }
   .room-item:hover{ background:var(--bg-2); color:var(--text-hi); }
   .room-item.active{ border-left-color:var(--teal); color:var(--teal); background:var(--bg-2); }
+  .room-item .room-name{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .room-item-action{
+    flex:none; background:none; border:none; color:var(--text-lo); cursor:pointer; font-size:12px; padding:3px 5px;
+  }
+  .room-item-action:hover{ color:var(--text-hi); }
+  .pin-display{
+    font-family:var(--font-mono); font-size:22px; letter-spacing:4px; text-align:center; color:var(--amber);
+    background:var(--bg-0); border:1px solid var(--line); padding:12px; user-select:all;
+  }
+  .pin-hint{ font-size:11.5px; color:var(--text-lo); margin:10px 0 0; }
+  .modal-error{ color:var(--red); font-size:12px; min-height:14px; margin-top:2px; }
   .btn-add-room{
     display:block; width:calc(100% - 28px); margin:6px 14px 4px; padding:7px 0; text-align:center;
     background:transparent; border:1px dashed var(--line); color:var(--amber); font-size:12px; cursor:pointer;
@@ -419,6 +430,7 @@
         <div class="room-item active" id="room-item-team">Zespół (wszyscy)</div>
       </div>
       <button class="btn-add-room" id="channel-add">+ Nowy pokój</button>
+      <button class="btn-add-room" id="btn-join-room">Dołącz przez kod</button>
 
       <div class="panel-title">WARSTWY</div>
       <label class="layer-row"><input type="checkbox" id="layer-units" checked> Jednostki</label>
@@ -545,6 +557,41 @@
   </div>
 </div>
 
+<!-- ======================= DOŁĄCZ DO POKOJU (NAZWA + PIN) ======================= -->
+<div class="modal-overlay" id="join-modal">
+  <div class="modal">
+    <h3>Dołącz do pokoju</h3>
+    <div class="field">
+      <label>NAZWA POKOJU</label>
+      <input type="text" id="join-name" placeholder="dokładna nazwa pokoju" maxlength="40">
+    </div>
+    <div class="field">
+      <label>KOD PIN</label>
+      <input type="text" id="join-pin" placeholder="np. 384920" maxlength="8" inputmode="numeric">
+    </div>
+    <div id="join-error" class="modal-error"></div>
+    <div class="modal-actions">
+      <button id="join-cancel">Anuluj</button>
+      <button class="confirm" id="join-confirm">Dołącz</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= KOD PIN POKOJU (PODGLĄD) ======================= -->
+<div class="modal-overlay" id="room-info-modal">
+  <div class="modal">
+    <h3 id="room-info-name">Pokój</h3>
+    <div class="field">
+      <label>KOD PIN DO UDOSTĘPNIENIA</label>
+      <div class="pin-display" id="room-info-pin">------</div>
+    </div>
+    <p class="pin-hint">Osoba dołączająca musi podać dokładną nazwę pokoju i ten kod.</p>
+    <div class="modal-actions">
+      <button id="room-info-close">Zamknij</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
 <script type="module">
@@ -570,7 +617,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, getDoc, getDocs, addDoc, collection, onSnapshot,
-  serverTimestamp, query, orderBy, limit, updateDoc, where
+  serverTimestamp, query, orderBy, limit, updateDoc, where, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
@@ -817,6 +864,7 @@ function cleanup() {
   if (unsubRooms) unsubRooms();
   currentChannel = { type: "team" };
   allUsersCache = [];
+  lastLocationDocs = [];
   Object.keys(trails).forEach(k => delete trails[k]);
 }
 
@@ -999,27 +1047,40 @@ function setConn(ok, text) {
 // ---------------------------------------------------------------
 // NASŁUCH LOKALIZACJI ZESPOŁU
 // ---------------------------------------------------------------
+let lastLocationDocs = []; // cache do ponownego renderu rostera przy zmianie pokoju
+
+function renderRoster() {
+  const rosterList = document.getElementById("roster-list");
+  rosterList.innerHTML = "";
+  const visibleDocs = lastLocationDocs.filter(({ uid }) => unitAllowedByChannel(uid));
+
+  if (visibleDocs.length === 0) {
+    rosterList.innerHTML = currentChannel.type === "room"
+      ? '<div class="roster-empty">Brak uczestników tego pokoju na mapie…</div>'
+      : '<div class="roster-empty">Brak aktywnych jednostek…</div>';
+    return;
+  }
+
+  visibleDocs.forEach(({ uid, d }) => {
+    const isStale = !d.updatedAt || (Date.now() - d.updatedAt.toMillis() > 120000);
+    const item = document.createElement("div");
+    item.className = "roster-item" + (isStale ? " offline" : "");
+    item.innerHTML = `<span class="swatch" style="background:${d.color || "#888"}"></span>
+      <div class="info"><div class="name">${escapeHtml(d.callsign || "operator")}</div>
+      <div class="meta">${isStale ? "OFFLINE" : "ONLINE"}</div></div>`;
+    item.addEventListener("click", () => { map.setView([d.lat, d.lng], 14); closeSidebarDrawer(); });
+    rosterList.appendChild(item);
+  });
+}
+
 function listenLocations() {
   unsubLocations = onSnapshot(collection(db, "locations"), (snap) => {
-    const rosterList = document.getElementById("roster-list");
-    rosterList.innerHTML = "";
-    if (snap.empty) rosterList.innerHTML = '<div class="roster-empty">Brak aktywnych jednostek…</div>';
-
+    lastLocationDocs = [];
     snap.forEach((docSnap) => {
       const uid = docSnap.id;
       const d = docSnap.data();
       if (typeof d.lat !== "number") return;
-
-      const isStale = !d.updatedAt || (Date.now() - d.updatedAt.toMillis() > 120000);
-
-      // -- roster --
-      const item = document.createElement("div");
-      item.className = "roster-item" + (isStale ? " offline" : "");
-      item.innerHTML = `<span class="swatch" style="background:${d.color || "#888"}"></span>
-        <div class="info"><div class="name">${escapeHtml(d.callsign || "operator")}</div>
-        <div class="meta">${isStale ? "OFFLINE" : "ONLINE"}</div></div>`;
-      item.addEventListener("click", () => { map.setView([d.lat, d.lng], 14); closeSidebarDrawer(); });
-      rosterList.appendChild(item);
+      lastLocationDocs.push({ uid, d });
 
       // -- map dot --
       const dotColor = d.color || "#888";
@@ -1053,6 +1114,7 @@ function listenLocations() {
         }
       }
     });
+    renderRoster();
   });
 }
 
@@ -1306,6 +1368,7 @@ function switchChannel(channel) {
   if (unsubMessages) unsubMessages();
   listenMessages();
   applyLayerVisibility("units"); // przefiltruj jednostki na mapie wg uczestników pokoju
+  renderRoster();
 }
 
 document.getElementById("room-item-team").addEventListener("click", () => switchChannel({ type: "team" }));
@@ -1322,15 +1385,33 @@ function listenRooms() {
     list.querySelectorAll(".room-item[data-room-id]").forEach(el => el.remove());
     snap.forEach(docSnap => {
       const d = docSnap.data();
+      const roomId = docSnap.id;
+      const roomName = d.name || "Pokój";
+
       const item = document.createElement("div");
       item.className = "room-item";
-      item.dataset.roomId = docSnap.id;
-      item.textContent = d.name || "Pokój";
-      if (currentChannel.type === "room" && currentChannel.id === docSnap.id) {
+      item.dataset.roomId = roomId;
+      item.innerHTML = `<span class="room-name">${escapeHtml(roomName)}</span>
+        <button class="room-item-action" data-action="pin" title="Pokaż kod PIN">🔑</button>
+        <button class="room-item-action" data-action="leave" title="Opuść pokój">✕</button>`;
+
+      if (currentChannel.type === "room" && currentChannel.id === roomId) {
         item.classList.add("active");
         currentChannel.members = d.members || []; // odśwież listę uczestników, gdyby się zmieniła
       }
-      item.addEventListener("click", () => switchChannel({ type: "room", id: docSnap.id, name: d.name || "Pokój", members: d.members || [] }));
+
+      item.querySelector(".room-name").addEventListener("click", () =>
+        switchChannel({ type: "room", id: roomId, name: roomName, members: d.members || [] })
+      );
+      item.querySelector('[data-action="pin"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        showRoomPin(roomName, d.pin || "——————");
+      });
+      item.querySelector('[data-action="leave"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        leaveRoom(roomId, roomName);
+      });
+
       list.appendChild(item);
     });
     // Jeśli aktualnie otwarty pokój został usunięty / straciliśmy do niego dostęp — wróć do czatu zespołu.
@@ -1338,9 +1419,66 @@ function listenRooms() {
       switchChannel({ type: "team" });
     } else if (currentChannel.type === "room") {
       applyLayerVisibility("units"); // uczestnicy mogli się zmienić
+      renderRoster();
     }
   });
 }
+
+function showRoomPin(name, pin) {
+  document.getElementById("room-info-name").textContent = name;
+  document.getElementById("room-info-pin").textContent = pin;
+  document.getElementById("room-info-modal").classList.add("open");
+}
+document.getElementById("room-info-close").addEventListener("click", () => {
+  document.getElementById("room-info-modal").classList.remove("open");
+});
+
+async function leaveRoom(roomId, roomName) {
+  if (!confirm(`Opuścić pokój "${roomName}"? Nie będziesz już widzieć jego czatu ani uczestników na mapie.`)) return;
+  await updateDoc(doc(db, "rooms", roomId), { members: arrayRemove(currentUser.uid) });
+  if (currentChannel.type === "room" && currentChannel.id === roomId) {
+    switchChannel({ type: "team" });
+  }
+}
+
+// ---------------------------------------------------------------
+// DOŁĄCZANIE DO POKOJU PRZEZ NAZWĘ + PIN
+// ---------------------------------------------------------------
+function inviteKeyFor(name, pin) {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "pokoj";
+  return `${slug}__${pin.trim()}`;
+}
+
+document.getElementById("btn-join-room").addEventListener("click", () => {
+  document.getElementById("join-name").value = "";
+  document.getElementById("join-pin").value = "";
+  document.getElementById("join-error").textContent = "";
+  document.getElementById("join-modal").classList.add("open");
+});
+document.getElementById("join-cancel").addEventListener("click", () => {
+  document.getElementById("join-modal").classList.remove("open");
+});
+document.getElementById("join-confirm").addEventListener("click", async () => {
+  const name = document.getElementById("join-name").value.trim();
+  const pin = document.getElementById("join-pin").value.trim();
+  const errEl = document.getElementById("join-error");
+  errEl.textContent = "";
+  if (!name || !pin) { errEl.textContent = "Podaj nazwę pokoju i kod PIN."; return; }
+
+  try {
+    const inviteSnap = await getDoc(doc(db, "roomInvites", inviteKeyFor(name, pin)));
+    if (!inviteSnap.exists()) {
+      errEl.textContent = "Nie znaleziono pokoju o takiej nazwie i kodzie PIN.";
+      return;
+    }
+    const { roomId } = inviteSnap.data();
+    await updateDoc(doc(db, "rooms", roomId), { members: arrayUnion(currentUser.uid) });
+    document.getElementById("join-modal").classList.remove("open");
+    switchChannel({ type: "room", id: roomId, name });
+  } catch (e) {
+    errEl.textContent = "Nie udało się dołączyć: " + (e.code || e.message);
+  }
+});
 
 // ---------------------------------------------------------------
 // TWORZENIE NOWEGO POKOJU
@@ -1378,16 +1516,33 @@ async function openRoomModal() {
 document.getElementById("room-cancel").addEventListener("click", () => {
   document.getElementById("room-modal").classList.remove("open");
 });
+function generatePin() {
+  return String(Math.floor(100000 + Math.random() * 900000)); // 6-cyfrowy kod
+}
+
 document.getElementById("room-confirm").addEventListener("click", async () => {
   const name = document.getElementById("room-name").value.trim();
   if (!name) return;
   const selected = Array.from(document.querySelectorAll("#room-members-list input:checked")).map(i => i.value);
   const members = Array.from(new Set([currentUser.uid, ...selected]));
+
+  // Wygeneruj unikalny PIN dla tej nazwy pokoju (bardzo mało prawdopodobna kolizja, ale sprawdzamy).
+  let pin, inviteRef, inviteSnap;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    pin = generatePin();
+    inviteRef = doc(db, "roomInvites", inviteKeyFor(name, pin));
+    inviteSnap = await getDoc(inviteRef);
+    if (!inviteSnap.exists()) break;
+  }
+
   const ref = await addDoc(collection(db, "rooms"), {
-    name, members, createdBy: currentProfile.callsign, createdAt: serverTimestamp()
+    name, members, pin, createdBy: currentProfile.callsign, createdAt: serverTimestamp()
   });
+  await setDoc(inviteRef, { roomId: ref.id });
+
   document.getElementById("room-modal").classList.remove("open");
   switchChannel({ type: "room", id: ref.id, name, members });
+  showRoomPin(name, pin);
 });
 
 function listenMessages() {
