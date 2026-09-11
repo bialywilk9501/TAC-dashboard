@@ -213,18 +213,17 @@
     padding:0 12px; border-bottom:1px solid var(--line); font-family:var(--font-mono); font-size:11.5px; color:var(--text-mid);
   }
   .chat-header button{ background:none; border:none; color:var(--text-lo); cursor:pointer; font-size:14px; }
-  .channel-row{
-    flex:none; display:flex; gap:6px; padding:8px 12px; border-bottom:1px solid var(--line);
-    overflow-x:auto; scrollbar-width:none;
+  .room-item{
+    padding:7px 14px; font-size:13px; color:var(--text-mid); cursor:pointer;
+    border-left:2px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .channel-row::-webkit-scrollbar{ display:none; }
-  .channel-chip{
-    flex:none; font-family:var(--font-mono); font-size:11px; color:var(--text-mid); background:var(--bg-0);
-    border:1px solid var(--line); padding:5px 10px; cursor:pointer; white-space:nowrap;
+  .room-item:hover{ background:var(--bg-2); color:var(--text-hi); }
+  .room-item.active{ border-left-color:var(--teal); color:var(--teal); background:var(--bg-2); }
+  .btn-add-room{
+    display:block; width:calc(100% - 28px); margin:6px 14px 4px; padding:7px 0; text-align:center;
+    background:transparent; border:1px dashed var(--line); color:var(--amber); font-size:12px; cursor:pointer;
   }
-  .channel-chip:hover{ color:var(--text-hi); }
-  .channel-chip.active{ border-color:var(--teal); color:var(--teal); }
-  .channel-chip.channel-add{ color:var(--amber); border-style:dashed; margin-left:auto; }
+  .btn-add-room:hover{ border-color:var(--amber); }
   .room-members-list{
     max-height:180px; overflow-y:auto; border:1px solid var(--line); background:var(--bg-0);
   }
@@ -327,6 +326,8 @@
     .layer-row{ padding:9px 14px; font-size:14px; }
     .layer-row input{ width:18px; height:18px; }
     .roster-item{ padding:10px 14px; }
+    .room-item{ padding:10px 14px; font-size:14px; }
+    .btn-add-room{ padding:9px 0; }
     .basemap-btn{ padding:9px 0; }
   }
 
@@ -413,6 +414,12 @@
       <div class="panel-title">ZESPÓŁ — NA ŻYWO</div>
       <div id="roster-list"><div class="roster-empty">Brak aktywnych jednostek…</div></div>
 
+      <div class="panel-title">POKOJE</div>
+      <div id="rooms-list">
+        <div class="room-item active" id="room-item-team">Zespół (wszyscy)</div>
+      </div>
+      <button class="btn-add-room" id="channel-add">+ Nowy pokój</button>
+
       <div class="panel-title">WARSTWY</div>
       <label class="layer-row"><input type="checkbox" id="layer-units" checked> Jednostki</label>
       <label class="layer-row"><input type="checkbox" id="layer-markers" checked> Znaczniki</label>
@@ -461,10 +468,6 @@
       <div class="chat-header">
         <span id="chat-header-title">ŁĄCZNOŚĆ ZESPOŁU</span>
         <button id="chat-hide">✕</button>
-      </div>
-      <div class="channel-row" id="channel-row">
-        <button class="channel-chip active" id="channel-team" data-type="team">Zespół</button>
-        <button class="channel-chip channel-add" id="channel-add" title="Nowy pokój prywatny">+ Pokój</button>
       </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="chat-input-row">
@@ -915,8 +918,9 @@ Object.entries(layerToggles).forEach(([key, el]) => {
 function applyLayerVisibility(key) {
   const visible = layerToggles[key].checked;
   if (key === "units") {
-    Object.values(unitMarkers).forEach(u => {
-      visible ? u.dot.addTo(map) : map.removeLayer(u.dot);
+    Object.entries(unitMarkers).forEach(([uid, u]) => {
+      const show = visible && unitAllowedByChannel(uid);
+      show ? u.dot.addTo(map) : map.removeLayer(u.dot);
     });
   }
   if (key === "markers") {
@@ -1028,7 +1032,7 @@ function listenLocations() {
           .bindTooltip(escapeHtml(d.callsign || "?"), { permanent: true, direction: "right", offset: [10, 0], className: "tac-tooltip" })
           .addTo(map);
         unitMarkers[uid] = { dot };
-        if (!layerToggles.units.checked) map.removeLayer(dot);
+        if (!layerToggles.units.checked || !unitAllowedByChannel(uid)) map.removeLayer(dot);
       } else {
         unitMarkers[uid].dot.setLatLng([d.lat, d.lng]);
         unitMarkers[uid].dot.setIcon(dotIcon);
@@ -1292,8 +1296,8 @@ function messagesCollectionRef() {
 
 function switchChannel(channel) {
   currentChannel = channel;
-  document.querySelectorAll(".channel-chip[data-room-id], #channel-team").forEach(el => {
-    const isActive = (channel.type === "team" && el.id === "channel-team") ||
+  document.querySelectorAll(".room-item").forEach(el => {
+    const isActive = (channel.type === "team" && el.id === "room-item-team") ||
       (channel.type === "room" && el.dataset.roomId === channel.id);
     el.classList.toggle("active", isActive);
   });
@@ -1301,29 +1305,39 @@ function switchChannel(channel) {
     channel.type === "room" ? ("POKÓJ: " + channel.name.toUpperCase()) : "ŁĄCZNOŚĆ ZESPOŁU";
   if (unsubMessages) unsubMessages();
   listenMessages();
+  applyLayerVisibility("units"); // przefiltruj jednostki na mapie wg uczestników pokoju
 }
 
-document.getElementById("channel-team").addEventListener("click", () => switchChannel({ type: "team" }));
+document.getElementById("room-item-team").addEventListener("click", () => switchChannel({ type: "team" }));
+
+function unitAllowedByChannel(uid) {
+  if (currentChannel.type !== "room") return true;
+  return Array.isArray(currentChannel.members) && currentChannel.members.includes(uid);
+}
 
 function listenRooms() {
   const q = query(collection(db, "rooms"), where("members", "array-contains", currentUser.uid));
   unsubRooms = onSnapshot(q, (snap) => {
-    const row = document.getElementById("channel-row");
-    row.querySelectorAll(".channel-chip[data-room-id]").forEach(el => el.remove());
-    const addBtn = document.getElementById("channel-add");
+    const list = document.getElementById("rooms-list");
+    list.querySelectorAll(".room-item[data-room-id]").forEach(el => el.remove());
     snap.forEach(docSnap => {
       const d = docSnap.data();
-      const chip = document.createElement("button");
-      chip.className = "channel-chip";
-      chip.dataset.roomId = docSnap.id;
-      chip.textContent = d.name || "Pokój";
-      if (currentChannel.type === "room" && currentChannel.id === docSnap.id) chip.classList.add("active");
-      chip.addEventListener("click", () => switchChannel({ type: "room", id: docSnap.id, name: d.name || "Pokój" }));
-      row.insertBefore(chip, addBtn);
+      const item = document.createElement("div");
+      item.className = "room-item";
+      item.dataset.roomId = docSnap.id;
+      item.textContent = d.name || "Pokój";
+      if (currentChannel.type === "room" && currentChannel.id === docSnap.id) {
+        item.classList.add("active");
+        currentChannel.members = d.members || []; // odśwież listę uczestników, gdyby się zmieniła
+      }
+      item.addEventListener("click", () => switchChannel({ type: "room", id: docSnap.id, name: d.name || "Pokój", members: d.members || [] }));
+      list.appendChild(item);
     });
     // Jeśli aktualnie otwarty pokój został usunięty / straciliśmy do niego dostęp — wróć do czatu zespołu.
     if (currentChannel.type === "room" && !snap.docs.some(d => d.id === currentChannel.id)) {
       switchChannel({ type: "team" });
+    } else if (currentChannel.type === "room") {
+      applyLayerVisibility("units"); // uczestnicy mogli się zmienić
     }
   });
 }
@@ -1373,7 +1387,7 @@ document.getElementById("room-confirm").addEventListener("click", async () => {
     name, members, createdBy: currentProfile.callsign, createdAt: serverTimestamp()
   });
   document.getElementById("room-modal").classList.remove("open");
-  switchChannel({ type: "room", id: ref.id, name });
+  switchChannel({ type: "room", id: ref.id, name, members });
 });
 
 function listenMessages() {
